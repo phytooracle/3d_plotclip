@@ -417,7 +417,7 @@ def postprocess_single_pass(path,outpath,folder,transformation,current_date):
     path_dict = get_path_dict(path,outpath,folder)
 
     pcd = load_pcd(path_dict['aligned_merged_path'])
-    transformed_pcd = transform_pcd(pcd,T, xy_scale=1.0, z_scale=0.01)
+    transformed_pcd = transform_pcd(pcd,T, xy_scale=1.0, z_scale=0.001)
     painted_pcd = paint_pcd(transformed_pcd)
     save_pcd(painted_pcd,path_dict['geocorrected_merged_path'])
     print(f"Saving geocorrected point cloud to {path_dict['geocorrected_merged_path']}")
