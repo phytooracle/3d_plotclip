@@ -126,8 +126,8 @@ def crop_single_plot(args):
     width = abs(UR[0] - UL[0])
     height = abs(UL[1] - LL[1])
 
-    r_x = width * 1.5
-    r_y = height * 1.5
+    r_x = width * 1.0
+    r_y = height * 1.0
 
     max_x, max_y, max_z = pcd.get_max_bound()
     min_x, min_y, min_z = pcd.get_min_bound()
@@ -381,7 +381,7 @@ def get_path_dict(path,outpath,folder_name):
 
     return path_dict
     
-def transform_pcd(pcd,T):
+'''def transform_pcd(pcd,T):
     points = np.array(pcd.points)
     z_points = np.copy(points[:,2])
     points[:,2] = 1
@@ -390,9 +390,9 @@ def transform_pcd(pcd,T):
     transformed_points = np.hstack((transformed_points, np.expand_dims(z_points*0.001,axis=-1)))
     transformed_pcd = o3d.geometry.PointCloud() 
     transformed_pcd.points = o3d.utility.Vector3dVector(transformed_points)
-    return transformed_pcd
+    return transformed_pcd'''
     
-'''def transform_pcd(pcd, T, xy_scale=1.0, z_scale=1.0):
+def transform_pcd(pcd, T, xy_scale=1.0, z_scale=1.0):
     points = np.array(pcd.points)
     xy = points[:, :2] * xy_scale
     ones = np.ones((xy.shape[0], 1))
@@ -403,7 +403,7 @@ def transform_pcd(pcd,T):
     transformed_pcd = o3d.geometry.PointCloud()
     transformed_pcd.points = o3d.utility.Vector3dVector(transformed_points)
 
-    return transformed_pcd'''
+    return transformed_pcd
 
 def save_pcd(pcd,path):
     o3d.io.write_point_cloud(path, pcd)
@@ -417,7 +417,7 @@ def postprocess_single_pass(path,outpath,folder,transformation,current_date):
     path_dict = get_path_dict(path,outpath,folder)
 
     pcd = load_pcd(path_dict['aligned_merged_path'])
-    transformed_pcd = transform_pcd(pcd,T)#, xy_scale=1.5, z_scale=0.01)
+    transformed_pcd = transform_pcd(pcd,T, xy_scale=1.0, z_scale=0.01)
     painted_pcd = paint_pcd(transformed_pcd)
     save_pcd(painted_pcd,path_dict['geocorrected_merged_path'])
     print(f"Saving geocorrected point cloud to {path_dict['geocorrected_merged_path']}")

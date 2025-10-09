@@ -86,9 +86,8 @@ def main():
                     pcd = o3d.io.read_point_cloud(pcd_path)
                     if not pcd.is_empty():
                         merged_pcd += pcd
-    merged_pcd_downsampled = merged_pcd.voxel_down_sample(voxel_size=5)
-    merged_pcd_downsampled_outpath = os.path.join(args.input,args.date + "_full_merged_geocorrected_downsampled.ply")
-    o3d.io.write_point_cloud(merged_pcd_downsampled_outpath, merged_pcd_downsampled)
+    merged_pcd_outpath = os.path.join(args.input,args.date + "_full_merged_geocorrected.ply")
+    o3d.io.write_point_cloud(merged_pcd_outpath, merged_pcd)
 
     # Step 4: Crop plots from the merged cloud
     print("Cropping plots from merged point cloud...")
