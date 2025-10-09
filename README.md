@@ -11,5 +11,6 @@ Subdirectories named after agricultural plots. Each subdirectory contains a sing
 * **Required Arguments:**
   * **Input directory containing point clouds:** '-i', '--input'
   * **Output directory:** '-o', '--output'
+  * **Folder name to be processed: '-f', '--folder'
   * **geoJSON file defining plot:** '-g', '--geojson'
   * **Date of data collection:** '-d', '--date'
