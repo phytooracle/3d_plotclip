@@ -18,9 +18,10 @@ Subdirectories named after agricultural plots. Each subdirectory contains a sing
   * **Transformation (from landmark selection):** '-t', '--transformation'
   * **geoJSON file defining plot:** '-g', '--geojson'
   * **Date of data collection:** '-d', '--date'
+  * **Maximum number of CPUs to use in multiprocessing:** '-c', '--cores'
     
 * **Optional Arguments:** 
   * **Maximum number of points in millions for additional downsampled output point cloud (default: 1):** '-p', '--points'
-  * **Skip geocorrection:** '--skipgeo'
+  * **Disable geocorrection:** '--disablegeo'
   * **Disable saving of merged point cloud:** '--disablepcd'
   * **Disable cropping of merged point cloud:** '--disablecrop'
