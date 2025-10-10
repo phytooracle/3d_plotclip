@@ -50,6 +50,9 @@ def transform_pcd(pcd, T):
     min_target = transformed_pcd_pos.get_min_bound()
     max_target = transformed_pcd_pos.get_max_bound()
     center_target = (min_target + max_target) / 2.0
+    del min_target, max_target
+    
+    del transformed_pcd_pos, points_pos, z_points_pos, transformed_points_pos, 
 
     points = np.asarray(pcd.points)
 
@@ -75,11 +78,13 @@ def transform_pcd(pcd, T):
     # Step 7: Create new point cloud
     transformed_pcd = o3d.geometry.PointCloud()
     transformed_pcd.points = o3d.utility.Vector3dVector(transformed_points)
+    del transformed_points, transformed_xy, ones, xy_hom, xy_scaled_up, z_m, 
     
     # Current bounding box
     min_current = transformed_pcd.get_min_bound()
     max_current = transformed_pcd.get_max_bound()
     center_current = (min_current + max_current) / 2.0
+    del min_current, max_current
     
     # Compute scale and translation
     offset = center_target - center_current
@@ -87,6 +92,7 @@ def transform_pcd(pcd, T):
     print("Center current: ", center_current)
     print("Translation offset: ", offset)
     transformed_pcd.translate(offset)
+    del offset, center_target, center_current
 
     return transformed_pcd
 
@@ -114,22 +120,28 @@ def postprocess_single_pass(path, outpath, folder, transformation, current_date)
     max_bound_pcd = pcd.get_max_bound()
     center_pcd = (min_bound_pcd + max_bound_pcd) / 2.0
     dimensions_pcd = max_bound_pcd - min_bound_pcd
+    del pcd, min_bound_pcd, max_bound_pcd
     
     min_bound = transformed_pcd.get_min_bound()
     max_bound = transformed_pcd.get_max_bound()
     center = (min_bound + max_bound) / 2.0
     dimensions = max_bound - min_bound
+    del min_bound, max_bound
 
     # Format and print debug information
     center_formatted_pcd = [f"{c:.1f}" for c in center_pcd]
     dimensions_formatted_pcd = [f"{d:.1f}" for d in dimensions_pcd]
+    del center_pcd, dimensions_pcd
     print(f"Original point cloud bounding box center: {center_formatted_pcd}")
     print(f"Original Bounding box dimensions (width, height, depth): {dimensions_formatted_pcd}")
+    del center_formatted_pcd, dimensions_formatted_pcd
     
     center_formatted = [f"{c:.1f}" for c in center]
     dimensions_formatted = [f"{d:.1f}" for d in dimensions]
+    del center, dimensions
     print(f"Corrected point cloud bounding box center: {center_formatted}")
     print(f"Corrected Bounding box dimensions (width, height, depth): {dimensions_formatted}")
+    del center_formatted, dimensions_formatted
 
     # Paint and save
     painted_pcd = paint_pcd(transformed_pcd)
@@ -166,8 +178,9 @@ def paint_pcd(pcd):
     ratios = (points[:,2]-mins[2])/(maxs[2]-mins[2])
     ratios = np.vstack((ratios,ratios,ratios)).T
     colors = np.array((ratios*color1+(1-ratios)*color2))
-
+    
     pcd.colors = o3d.utility.Vector3dVector(colors)
+    del points, mins, maxs, ratios, colors, color1, color2
     return pcd
 
 def get_path_dict(path,outpath,folder_name):
@@ -275,6 +288,7 @@ def crop_and_save_plots(pcd, plots, outpath, transformation_json_path, force_cro
                 outpath = outpath.encode('ascii', 'ignore').decode('ascii').strip()
                 plot_id_clean = plot_id.encode('ascii', 'ignore').decode('ascii').strip()
                 painted_pcd = paint_pcd(plot_pcd)
+                del plot_pcd
                 save_path = os.path.join(outpath, f"{plot_id_clean}.ply")
                 print("Saving to ", save_path)
                 save_pcd(painted_pcd, save_path)
