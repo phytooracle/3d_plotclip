@@ -3,82 +3,207 @@ import os
 import json
 import numpy as np
 import open3d as o3d
-from pyproj import Proj,transform
+from pyproj import CRS, transform, Transformer
+    
+proj_latlon = "EPSG:4326" #CRS.from_epsg(4326) # WGS 84 -- WGS84 - World Geodetic System 1984, used in GPS
+proj_utm = "EPSG:32612" #CRS.from_epsg(32612) # WGS 84 / UTM zone 12N
+transformer_to_latlon = Transformer.from_crs(proj_utm, proj_latlon, always_xy=True)
+transformer_to_utm = Transformer.from_crs(proj_latlon, proj_utm, always_xy=True)
 
-proj_4326 = Proj('epsg:4326') # WGS84 lat/lon
-proj_utm = Proj('epsg:32612') # UTM Zone 12N for Arizona
+def utm_to_latlon(easting, northing):
+    """
+    Convert UTM coordinates to geographic coordinates
+    """
+    try:
+        lon, lat = transformer_to_latlon.transform(easting, northing)
+        return lon, lat
+    except Exception as e:
+        print(f"Error converting UTM to lat/lon: {e}")
+        return None
 
+def latlon_to_utm(lon, lat):
+    """
+    Convert geographic coordinates to UTM coordinates
+    """
+    try:
+        easting, northing = transformer_to_utm.transform(lon, lat)
+        return easting, northing
+    except Exception as e:
+        print(f"Error converting lat/lon to UTM: {e}")
+        return None
 
-def get_path_dict_cropping(path,outpath,folder_name):
+def transform_pcd(pcd, T):
+    """
+    Adjust XY using affine transformation. Convert Z from millimeters to meters. Align bounding box
+    center and dimensions. Return transformed point cloud in meters.
+    """
+    points_pos = np.array(pcd.points)
+    z_points_pos = np.copy(points_pos[:,2])
+    points_pos[:,2] = 1
+    transformed_points_pos = np.matmul(T,points_pos.T).T
+    transformed_points_pos = transformed_points_pos[:,:2]
+    transformed_points_pos = np.hstack((transformed_points_pos, np.expand_dims(z_points_pos*0.001,axis=-1)))
+    transformed_pcd_pos = o3d.geometry.PointCloud() 
+    transformed_pcd_pos.points = o3d.utility.Vector3dVector(transformed_points_pos)
+    
+    # Target bounding box
+    min_target = transformed_pcd_pos.get_min_bound()
+    max_target = transformed_pcd_pos.get_max_bound()
+    center_target = (min_target + max_target) / 2.0
+
+    points = np.asarray(pcd.points)
+
+    # Step 1: Scale XY up by 1000 before applying T
+    xy_scaled_up = points[:, :2] * 1000  # Pretend mm → exaggerated mm
+
+    # Step 2: Add homogeneous coordinate
+    ones = np.ones((xy_scaled_up.shape[0], 1))
+    xy_hom = np.hstack((xy_scaled_up, ones))
+
+    # Step 3: Apply transformation
+    transformed_xy = (T @ xy_hom.T).T  # Shape: (N, 2)
+
+    # Step 4: Normalize back by dividing by 1000 (undo exaggeration)
+    normalized_xy = transformed_xy / 1000.0
+
+    # Step 5: Convert Z to meters
+    z_m = points[:, 2] * 0.001
+
+    # Step 6: Combine normalized XY with scaled Z
+    transformed_points = np.hstack((normalized_xy, z_m.reshape(-1, 1)))
+
+    # Step 7: Create new point cloud
+    transformed_pcd = o3d.geometry.PointCloud()
+    transformed_pcd.points = o3d.utility.Vector3dVector(transformed_points)
+    
+    # Current bounding box
+    min_current = transformed_pcd.get_min_bound()
+    max_current = transformed_pcd.get_max_bound()
+    center_current = (min_current + max_current) / 2.0
+    
+    # Compute scale and translation
+    offset = center_target - center_current
+    print("Center target: ", center_target)
+    print("Center current: ", center_current)
+    print("Translation offset: ", offset)
+    transformed_pcd.translate(offset)
+
+    return transformed_pcd
+
+def postprocess_single_pass(path, outpath, folder, transformation, current_date):
+    """
+    Load point cloud for single scan pass. Apply geocorrection using transformation matrix.
+    Compute bounding box stats, color point cloud, and save geocorrected result.
+    """
+    # Load transformation matrix
+    with open(transformation, 'r') as f:
+        tr = json.load(f)
+    T = np.array(tr['transformation'])
+
+    # Get paths
+    path_dict = get_path_dict(path, outpath, folder)
+
+    # Load and transform point cloud
+    pcd = load_pcd(path_dict['aligned_merged_path'])
+
+    # Apply original transformation
+    transformed_pcd = transform_pcd(pcd, T)
+
+    # Compute bounding box center and dimensions
+    min_bound_pcd = pcd.get_min_bound()
+    max_bound_pcd = pcd.get_max_bound()
+    center_pcd = (min_bound_pcd + max_bound_pcd) / 2.0
+    dimensions_pcd = max_bound_pcd - min_bound_pcd
+    
+    min_bound = transformed_pcd.get_min_bound()
+    max_bound = transformed_pcd.get_max_bound()
+    center = (min_bound + max_bound) / 2.0
+    dimensions = max_bound - min_bound
+
+    # Format and print debug information
+    center_formatted_pcd = [f"{c:.1f}" for c in center_pcd]
+    dimensions_formatted_pcd = [f"{d:.1f}" for d in dimensions_pcd]
+    print(f"Original point cloud bounding box center: {center_formatted_pcd}")
+    print(f"Original Bounding box dimensions (width, height, depth): {dimensions_formatted_pcd}")
+    
+    center_formatted = [f"{c:.1f}" for c in center]
+    dimensions_formatted = [f"{d:.1f}" for d in dimensions]
+    print(f"Corrected point cloud bounding box center: {center_formatted}")
+    print(f"Corrected Bounding box dimensions (width, height, depth): {dimensions_formatted}")
+
+    # Paint and save
+    painted_pcd = paint_pcd(transformed_pcd)
+    save_pcd(painted_pcd, path_dict['geocorrected_merged_path'])
+    print(f"Saving geocorrected point cloud to {path_dict['geocorrected_merged_path']}\n")
+    
+def save_pcd(pcd,path):
+    """
+    Write point cloud to disk in binary PLY format using Open3D
+    """
+    o3d.io.write_point_cloud(path, pcd, write_ascii=False)
+
+def load_pcd(path):
+    """
+    Read point cloud from disk in PLY format using Open3D
+    """
+    pcd = o3d.io.read_point_cloud(path,format="ply")
+    return pcd
+
+def paint_pcd(pcd):
+    """
+    Apply color gradient to a point cloud based on z-axis height. 
+    High points yellow. Low points red. Return colored point cloud.
+    """
+    color1 = (255/255, 255/255, 0)
+    color2 = (170/255, 0, 0)
+
+    pcd.paint_uniform_color([1,1,1])
+    points = np.array(pcd.points)
+
+    mins = np.min(points,axis=0)
+    maxs = np.max(points,axis=0)
+
+    ratios = (points[:,2]-mins[2])/(maxs[2]-mins[2])
+    ratios = np.vstack((ratios,ratios,ratios)).T
+    colors = np.array((ratios*color1+(1-ratios)*color2))
+
+    pcd.colors = o3d.utility.Vector3dVector(colors)
+    return pcd
+
+def get_path_dict(path,outpath,folder_name):
+    """
+    Generate and return dictionary of file paths for input merged point cloud, 
+    output geocorrected point cloud, pass ID, and folder name.
+    """
     if path[-1] == '/':
         path = path[:-1]
-    
-    folder_name = folder_name.replace('/','')
 
     merged_path = os.path.join(path,"merged",folder_name)
     # Check if the merged_path directory is not empty
     merged_files = os.listdir(merged_path)
     if not merged_files:
-        raise FileNotFoundError(f"No files found in merged path: {merged_path}")
+        raise FileNotFoundError(f"No files found in merged path: {merged_path}")    
     
-    pass_id = os.listdir(merged_path)[0].split('/')[-1].split('_')[0]
-    geocorrected_merged_path = os.path.join(merged_path,f"{pass_id}__Top-heading-merged.ply")
+    pass_id = os.listdir(os.path.join(path,"merged",folder_name))[0].split('/')[-1].split('_')[0]
 
-    merged_outpath = os.path.join(outpath,"merged")
-    if not os.path.exists(merged_outpath):
-        os.makedirs(merged_outpath)
+    merged_outpath = os.path.join(outpath,"merged_geocorrected",folder_name)
 
-    path_dict_cropping = {}
-    
-    path_dict_cropping['geocorrected_merged_path'] = geocorrected_merged_path
-    path_dict_cropping['cropped_merged_path'] = merged_outpath
-    path_dict_cropping['pass_id'] = pass_id
-    path_dict_cropping['folder_name'] = folder_name
+    os.makedirs(merged_outpath,exist_ok=True)
 
-    return path_dict_cropping
+    aligned_merged_path = os.path.join(merged_path,f"{pass_id}__Top-heading-merged.ply")
+    geocorrected_merged_path = os.path.join(merged_outpath,f"{pass_id}__Top-heading-merged.ply")
 
-def crop_plots(path,outpath,folder,plotpath,current_date):
-    path_dict_cropping = get_path_dict_cropping(path,outpath,folder)
-    plots = load_plots(plotpath,current_date)
+    path_dict = {}
+    path_dict['aligned_merged_path'] = aligned_merged_path
+    path_dict['geocorrected_merged_path'] = geocorrected_merged_path
+    path_dict['pass_id'] = pass_id
+    path_dict['folder_name'] = folder_name
 
-    print(f":: Beginning processing {path_dict_cropping['folder_name']}.")
-    
-    pcd_path = path_dict_cropping['geocorrected_merged_path']
-    pcd = o3d.io.read_point_cloud(pcd_path)
-    cropped_plots = crop_all_plots(pcd,plots)
-    save_cropped_plots(cropped_plots,path_dict_cropping['cropped_merged_path'],path_dict_cropping['folder_name'])
-
-def load_pcd(path):
-    pcd = o3d.io.read_point_cloud(path,format="ply")
-    return pcd
-
-def latlon_to_utm(lon, lat):
-    return proj_utm(lon, lat)
-
-def utm_to_latlon(easting, northing):
-    return proj_utm(easting, northing, inverse=True)
-
-def get_boundings_pcd(pcd,tolatlon=False):
-    mins = np.min(np.array(pcd.points),axis=0)
-    maxs = np.max(np.array(pcd.points),axis=0)
-
-    if not tolatlon:
-        return {"mins":list(mins),"maxs":list(maxs)}
-    else:
-        new_mins = utm_to_latlon(mins[0],mins[1])
-        new_maxs = utm_to_latlon(maxs[0],maxs[1])
-        return {"mins":list(new_mins),"maxs":list(new_maxs)}
-
+    return path_dict
+   
 def load_plots(geojson_path):
     """
-    Loads plot data from a GeoJSON file.
-
-    Parameters:
-    - geojson_path: Path to the GeoJSON file.
-
-    Returns:
-    - plots: A dictionary where each key is a plot ID and the value is a dictionary
-             containing corner coordinates and center point.
+    Parse GeoJSON file to extract plot definitions. Return dictionary of plot IDs with corner and center coordinates.
     """
     plots = {}
 
@@ -114,110 +239,18 @@ def load_plots(geojson_path):
             }
     
     return plots
-
-def crop_single_plot(args):
-    print("Cropping single plot...")
-    UL = args[0]
-    UR = args[1]
-    LL = args[2]
-    LR = args[3]
-    pcd = args[4]
-
-    width = abs(UR[0] - UL[0])
-    height = abs(UL[1] - LL[1])
-
-    r_x = width * 1.0
-    r_y = height * 1.0
-
-    max_x, max_y, max_z = pcd.get_max_bound()
-    min_x, min_y, min_z = pcd.get_min_bound()
-
-    bounding_polygon = np.array([
-        [max(min_x, UL[0] - r_x), max(min_y, UL[1] - r_y), 0],
-        [min(max_x, UR[0] + r_x), max(min_y, UR[1] - r_y), 0],
-        [min(max_x, LR[0] + r_x), min(max_y, LR[1] + r_y), 0],
-        [max(min_x, LL[0] - r_x), min(max_y, LL[1] + r_y), 0]
-    ]).astype('float64')
-
-    vol = o3d.visualization.SelectionPolygonVolume()
-    vol.orthogonal_axis = "Z"
-    vol.axis_max = max_z
-    vol.axis_min = min_z
-    vol.bounding_polygon = o3d.utility.Vector3dVector(bounding_polygon)
     
-    print("Cropping bounds:")
-    print("UL:", UL)
-    print("UR:", UR)
-    print("LL:", LL)
-    print("LR:", LR)
-    print("Bounding polygon:", bounding_polygon)
-    print("Point cloud bounds:", min_x, min_y, min_z, max_x, max_y, max_z)
-
-    plot = vol.crop_point_cloud(pcd)
-    print("Finished cropping single plot")
-    
-    return plot
-
-def check_point_in_boundaries(lon,lat,boundaries):
-    return lon>boundaries['mins'][0] and lon<boundaries['maxs'][0] and lat>boundaries['mins'][1] and lat<boundaries['maxs'][1]
-
-def crop_all_plots(pcd, plots, force_crop=False):
-    cropped_plots = {}
+def crop_and_save_plots(pcd, plots, outpath, transformation_json_path, force_crop=False):
+    """
+    Iterate through plots and crops corresponding regions from merged point cloud. 
+    Converts plot coordinates to UTM, crops point cloud using bounding polygons, 
+    and saves cropped plots to disk.
+    """
     boundaries = get_boundings_pcd(pcd, tolatlon=True)
 
-    for plot_id, coord in plots.items():
-        lon, lat = coord['C']
-        print(f"Plot {plot_id} center: {lon}, {lat}")
-        print(f"Bounding box: {boundaries}")
-
-        should_crop = force_crop or check_point_in_boundaries(lon, lat, boundaries)
-        if should_crop:
-            print(f"Cropping plot {plot_id}")
-            UL = latlon_to_utm(coord['UL'][0], coord['UL'][1])
-            UR = latlon_to_utm(coord['UR'][0], coord['UR'][1])
-            LL = latlon_to_utm(coord['LL'][0], coord['LL'][1])
-            LR = latlon_to_utm(coord['LR'][0], coord['LR'][1])
-            plot_pcd = crop_single_plot((UL, UR, LL, LR, pcd))
-            cropped_plots[plot_id] = plot_pcd
-        else:
-            print(f"Skipping plot {plot_id}: outside bounding box")
-
-    return cropped_plots
-
-def paint_pcd(pcd):
-    color1 = (255/255, 255/255, 0)
-    color2 = (170/255, 0, 0)
-
-    pcd.paint_uniform_color([1,1,1])
-    points = np.array(pcd.points)
-
-    mins = np.min(points,axis=0)
-    maxs = np.max(points,axis=0)
-
-    ratios = (points[:,2]-mins[2])/(maxs[2]-mins[2])
-    ratios = np.vstack((ratios,ratios,ratios)).T
-    colors = np.array((ratios*color1+(1-ratios)*color2))
-
-    pcd.colors = o3d.utility.Vector3dVector(colors)
-    return pcd
-
-def save_cropped_plots(cropped_plots, outpath, identifier):
-    for plot_id, pcd in cropped_plots.items():
-        if not pcd.is_empty():
-            outpath = outpath.encode('ascii', 'ignore').decode('ascii').strip()
-            plot_id = plot_id.encode('ascii', 'ignore').decode('ascii').strip()
-            plot_path = os.path.join(outpath, plot_id)
-            
-            if not os.path.exists(plot_path):
-                os.mkdir(plot_path)
-            
-            painted_pcd = paint_pcd(pcd)
-            save_path = os.path.join(plot_path, f"{identifier}_cropped.ply")
-            o3d.io.write_point_cloud(save_path, painted_pcd)
-            print("Saved ", save_path)
-
-def crop_and_save_plots(pcd, plots, outpath, identifier, force_crop=False):
-    boundaries = get_boundings_pcd(pcd, tolatlon=True)
+    # Load transformation matrix
+    with open(transformation_json_path, 'r') as f:
+        T = np.array(json.load(f)["transformation"])
 
     for plot_id, coord in plots.items():
         lon, lat = coord['C']
@@ -227,198 +260,87 @@ def crop_and_save_plots(pcd, plots, outpath, identifier, force_crop=False):
         should_crop = force_crop or check_point_in_boundaries(lon, lat, boundaries)
         if should_crop:
             print(f"Cropping and saving plot {plot_id}")
+
+            # Step 1: Convert laton to utm
             UL = latlon_to_utm(coord['UL'][0], coord['UL'][1])
             UR = latlon_to_utm(coord['UR'][0], coord['UR'][1])
             LL = latlon_to_utm(coord['LL'][0], coord['LL'][1])
             LR = latlon_to_utm(coord['LR'][0], coord['LR'][1])
+
+            # Step 2: Crop
             plot_pcd = crop_single_plot((UL, UR, LL, LR, pcd))
 
             print("Checking if empty...")
             if not plot_pcd.is_empty():
                 outpath = outpath.encode('ascii', 'ignore').decode('ascii').strip()
                 plot_id_clean = plot_id.encode('ascii', 'ignore').decode('ascii').strip()
-                plot_path = os.path.join(outpath, plot_id_clean)
-
-                if not os.path.exists(plot_path):
-                    os.mkdir(plot_path)
-
                 painted_pcd = paint_pcd(plot_pcd)
-                save_path = os.path.join(plot_path, f"{identifier}_cropped.ply")
+                save_path = os.path.join(outpath, f"{plot_id_clean}.ply")
                 print("Saving to ", save_path)
-                o3d.io.write_point_cloud(save_path, painted_pcd)
-                print("Saved\n", save_path)
+                save_pcd(painted_pcd, save_path)
+                print(f"Saved {save_path}\n")
             else:
-                print("plot_pcd is empty!\n")    
+                print(f"plot_pcd is empty for plot {plot_id}!")
+                print("Cropping polygon might be outside bounds.\n")
         else:
             print(f"Skipping plot {plot_id}: outside bounding box\n")
-
-def pairwise_registration(source, target,max_correspondence_distance_coarse, max_correspondence_distance_fine):
-    icp_coarse = o3d.pipelines.registration.registration_icp(
-        source, target, max_correspondence_distance_coarse, np.identity(4),
-        o3d.pipelines.registration.TransformationEstimationPointToPlane())
-    icp_fine = o3d.pipelines.registration.registration_icp(
-        source, target, max_correspondence_distance_fine,
-        icp_coarse.transformation,
-        o3d.pipelines.registration.TransformationEstimationPointToPlane())
-    transformation_icp = icp_fine.transformation
-    information_icp = o3d.pipelines.registration.get_information_matrix_from_point_clouds(
-        source, target, max_correspondence_distance_fine,
-        icp_fine.transformation)
-    return transformation_icp, information_icp
-
-def full_registration(pcds, max_correspondence_distance_coarse, max_correspondence_distance_fine):
-    pose_graph = o3d.pipelines.registration.PoseGraph()
-    odometry = np.identity(4)
-    pose_graph.nodes.append(o3d.pipelines.registration.PoseGraphNode(odometry))
-
-    n_pcds = len(pcds)
-    for source_id in range(n_pcds):
-        for target_id in range(source_id + 1, n_pcds):
-            transformation_icp, information_icp = pairwise_registration(
-                pcds[source_id], pcds[target_id],max_correspondence_distance_coarse,max_correspondence_distance_fine)
-          
-            odometry = np.dot(transformation_icp, odometry)
-            pose_graph.nodes.append(
-                o3d.pipelines.registration.PoseGraphNode(
-                    np.linalg.inv(odometry)))
-            pose_graph.edges.append(
-                o3d.pipelines.registration.PoseGraphEdge(source_id,
-                                                            target_id,
-                                                            transformation_icp,
-                                                            information_icp,
-                                                            uncertain=False))
-
-    return pose_graph
-
-def full_register_merge_pcds(pcds):
-    voxel_size = 1e-3
-    max_correspondence_distance_coarse = voxel_size * 15
-    max_correspondence_distance_fine = voxel_size * 1.5
-    with o3d.utility.VerbosityContextManager(
-            o3d.utility.VerbosityLevel.Debug) as cm:
-        pose_graph = full_registration(pcds,
-                                    max_correspondence_distance_coarse,
-                                    max_correspondence_distance_fine)
-
-    option = o3d.pipelines.registration.GlobalOptimizationOption(
-    max_correspondence_distance=max_correspondence_distance_fine,
-    edge_prune_threshold=0.25,
-    reference_node=0)
-    with o3d.utility.VerbosityContextManager(
-            o3d.utility.VerbosityLevel.Debug) as cm:
-        o3d.pipelines.registration.global_optimization(
-            pose_graph,
-            o3d.pipelines.registration.GlobalOptimizationLevenbergMarquardt(),
-            o3d.pipelines.registration.GlobalOptimizationConvergenceCriteria(),
-            option)
-
-    pcd_combined = o3d.geometry.PointCloud()
-    for point_id in range(len(pcds)):
-        pcds[point_id].transform(pose_graph.nodes[point_id].pose)
-        pcd_combined += pcds[point_id]
-    
-    return pcd_combined
-    
-def load_plot_pcds(plot_folder):
-    """
-    Load all .ply files from a plot folder.
-    """
-    pcds = []
-    for filename in os.listdir(plot_folder):
-        if filename.endswith("_cropped.ply"):
-            file_path = os.path.join(plot_folder, filename)
-            pcd = o3d.io.read_point_cloud(file_path)
-            if not pcd.is_empty():
-                pcds.append(pcd)
-    return pcds
-
-def merge_plot_point_clouds(base_path, output_path):
-    """
-    For each plot folder in base_path, merge all cropped point clouds and save the result.
-    """
-    for plot_id in os.listdir(base_path):
-        plot_folder = os.path.join(base_path, plot_id)
-        if os.path.isdir(plot_folder):
-            print(f"Processing plot: {plot_id}")
-            pcds = load_plot_pcds(plot_folder)
-            if len(pcds) > 1:
-                merged_pcd = full_register_merge_pcds(pcds)
-            elif len(pcds) == 1:
-                merged_pcd = pcds[0]
-            else:
-                continue  # Skip empty folders
-
-            # Save merged point cloud
-            save_path = os.path.join(output_path, f"{plot_id}_merged.ply")
-            o3d.io.write_point_cloud(save_path, merged_pcd)
-            print(f"Saved merged point cloud to: {save_path}")
-                  
-def get_path_dict(path,outpath,folder_name):
-    if path[-1] == '/':
-        path = path[:-1]
-
-    merged_path = os.path.join(path,"merged",folder_name)
-    # Check if the merged_path directory is not empty
-    merged_files = os.listdir(merged_path)
-    if not merged_files:
-        raise FileNotFoundError(f"No files found in merged path: {merged_path}")    
-    
-    pass_id = os.listdir(os.path.join(path,"merged",folder_name))[0].split('/')[-1].split('_')[0]
-
-
-    merged_outpath = os.path.join(outpath,"merged_geocorrected",folder_name)
-
-    os.makedirs(merged_outpath,exist_ok=True)
-
-    aligned_merged_path = os.path.join(merged_path,f"{pass_id}__Top-heading-merged.ply")
-    geocorrected_merged_path = os.path.join(merged_outpath,f"{pass_id}__Top-heading-merged.ply")
-
-    path_dict = {}
-    path_dict['aligned_merged_path'] = aligned_merged_path
-    path_dict['geocorrected_merged_path'] = geocorrected_merged_path
-    path_dict['pass_id'] = pass_id
-    path_dict['folder_name'] = folder_name
-
-    return path_dict
-    
-'''def transform_pcd(pcd,T):
-    points = np.array(pcd.points)
-    z_points = np.copy(points[:,2])
-    points[:,2] = 1
-    transformed_points = np.matmul(T,points.T).T
-    transformed_points = transformed_points[:,:2]
-    transformed_points = np.hstack((transformed_points, np.expand_dims(z_points*0.001,axis=-1)))
-    transformed_pcd = o3d.geometry.PointCloud() 
-    transformed_pcd.points = o3d.utility.Vector3dVector(transformed_points)
-    return transformed_pcd'''
-    
-def transform_pcd(pcd, T, xy_scale=1.0, z_scale=1.0):
-    points = np.array(pcd.points)
-    xy = points[:, :2] * xy_scale
-    ones = np.ones((xy.shape[0], 1))
-    xy_hom = np.hstack((xy, ones))
-    transformed_xy = (T @ xy_hom.T).T
-    transformed_points = np.hstack((transformed_xy, points[:, 2:3] * z_scale))
-
-    transformed_pcd = o3d.geometry.PointCloud()
-    transformed_pcd.points = o3d.utility.Vector3dVector(transformed_points)
-
-    return transformed_pcd
-
-def save_pcd(pcd,path):
-    o3d.io.write_point_cloud(path, pcd)
-
-def postprocess_single_pass(path,outpath,folder,transformation,current_date):
-    with open(transformation,'r') as f:
-        tr = json.load(f)
-
-    T = np.array(tr['transformation'])
-
-    path_dict = get_path_dict(path,outpath,folder)
-
-    pcd = load_pcd(path_dict['aligned_merged_path'])
-    transformed_pcd = transform_pcd(pcd,T, xy_scale=1.0, z_scale=0.001)
-    painted_pcd = paint_pcd(transformed_pcd)
-    save_pcd(painted_pcd,path_dict['geocorrected_merged_path'])
-    print(f"Saving geocorrected point cloud to {path_dict['geocorrected_merged_path']}")
             
+def get_boundings_pcd(pcd,tolatlon=False):
+    """
+    Compute bounding box of point cloud. Returns min and max coordinates. 
+    Optionally converts bounds to geographic coordinates.
+    """
+    mins = np.min(np.array(pcd.points),axis=0)
+    maxs = np.max(np.array(pcd.points),axis=0)
+
+    if not tolatlon:
+        return {"mins":list(mins),"maxs":list(maxs)}
+    else:
+        new_mins = utm_to_latlon(mins[0],mins[1])
+        new_maxs = utm_to_latlon(maxs[0],maxs[1])
+        return {"mins":list(new_mins),"maxs":list(new_maxs)}
+        
+def crop_single_plot(args):
+    """
+    Crop point cloud using polygon defined by four UTM coordinates. 
+    Creates bounding polygon, crops with Open3D, then returns cropped point cloud.
+    """
+    print("Cropping single plot...")
+    UL = args[0]
+    UR = args[1]
+    LL = args[2]
+    LR = args[3]
+    pcd = args[4]
+    print("Expecting UTM coordinates for cropping polygon")
+    print("UL:", UL)
+    print("UR:", UR)
+    print("LL:", LL)
+    print("LR:", LR)
+    width = abs(UR[0] - UL[0])
+    height = abs(UL[1] - LL[1])
+    r_x = width * 0
+    r_y = height * 0
+    max_x, max_y, max_z = pcd.get_max_bound()
+    min_x, min_y, min_z = pcd.get_min_bound()
+    bounding_polygon = np.array([
+        [UL[0] - r_x, UL[1] - r_y, 0],
+        [UR[0] + r_x, UR[1] - r_y, 0],
+        [LR[0] + r_x, LR[1] + r_y, 0],
+        [LL[0] - r_x, LL[1] + r_y, 0]
+    ]).astype('float64')
+    print("Bounding polygon (UTM):", bounding_polygon)
+    print("Point cloud bounds:", min_x, min_y, min_z, max_x, max_y, max_z)
+    vol = o3d.visualization.SelectionPolygonVolume()
+    vol.orthogonal_axis = "Z"
+    vol.axis_max = max_z
+    vol.axis_min = min_z
+    vol.bounding_polygon = o3d.utility.Vector3dVector(bounding_polygon)
+    plot = vol.crop_point_cloud(pcd)
+    print("Finished cropping single plot")
+    return plot
+
+def check_point_in_boundaries(lon,lat,boundaries):
+    """
+    Checks if a given geographic point lies within specified bounding box limits.
+    """
+    return lon>boundaries['mins'][0] and lon<boundaries['maxs'][0] and lat>boundaries['mins'][1] and lat<boundaries['maxs'][1]

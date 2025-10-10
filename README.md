@@ -1,8 +1,10 @@
 # 3D Plot Clip
-This repository contains code for cropping plots from the geocorrected 3D point clouds. Geocorrected 3D point clouds from scanner measurements are cropped to geoJSON shape files, then merged.
+This repository contains code for cropping plots from the 3D point clouds. 3D point clouds from scanner measurements are first geocorrected. Geocorrected files are merged and full-scale and downsampled merged point clouds are output. The full-scale merged point cloud is then cropped to the geoJSON shapefile to result in a directory containing a PLY file for each agricultural plot.
 
 ## Inputs
-Geocorrected 3D point clouds that have undergone pre- and post-processing.
+3D point clouds that have undergone preprocessing (i.e., level 1 3D outputs)
+Transformation JSON output from 3D Landmark selection.
+Season GeoJSON defining plot boundaries.
 
 ## Outputs
 Subdirectories named after agricultural plots. Each subdirectory contains a single 3D point cloud that consitute an individual plot.
@@ -11,6 +13,11 @@ Subdirectories named after agricultural plots. Each subdirectory contains a sing
 * **Required Arguments:**
   * **Input directory containing point clouds:** '-i', '--input'
   * **Output directory:** '-o', '--output'
-  * **Folder name to be processed: '-f', '--folder'
+  * **Transformation (from landmark selection):** '-t', '--transformation'
   * **geoJSON file defining plot:** '-g', '--geojson'
   * **Date of data collection:** '-d', '--date'
+ * **Optional Arguments:** 
+  * **Maximum number of points in millions for additional downsampled output point cloud (default: 1):** '-p', '--points'
+  * **Skip geocorrection:** '--skipgeo'
+  * **Disable saving of merged point cloud:** '--disablepcd'
+  * **Disable cropping of merged point cloud:** '--disablecrop'
