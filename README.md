@@ -3,7 +3,9 @@ This repository contains code for cropping plots from the 3D point clouds. 3D po
 
 ## Inputs
 3D point clouds that have undergone preprocessing (i.e., level 1 3D outputs)
+
 Transformation JSON output from 3D Landmark selection.
+
 Season GeoJSON defining plot boundaries.
 
 ## Outputs
@@ -16,7 +18,8 @@ Subdirectories named after agricultural plots. Each subdirectory contains a sing
   * **Transformation (from landmark selection):** '-t', '--transformation'
   * **geoJSON file defining plot:** '-g', '--geojson'
   * **Date of data collection:** '-d', '--date'
- * **Optional Arguments:** 
+    
+* **Optional Arguments:** 
   * **Maximum number of points in millions for additional downsampled output point cloud (default: 1):** '-p', '--points'
   * **Skip geocorrection:** '--skipgeo'
   * **Disable saving of merged point cloud:** '--disablepcd'
