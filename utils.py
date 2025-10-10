@@ -88,9 +88,9 @@ def transform_pcd(pcd, T):
     
     # Compute scale and translation
     offset = center_target - center_current
-    print("Center target: ", center_target)
-    print("Center current: ", center_current)
-    print("Translation offset: ", offset)
+    #print("Center target: ", center_target)
+    #print("Center current: ", center_current)
+    #print("Translation offset: ", offset)
     transformed_pcd.translate(offset)
     del offset, center_target, center_current
 
@@ -132,15 +132,15 @@ def postprocess_single_pass(path, outpath, folder, transformation, current_date)
     center_formatted_pcd = [f"{c:.1f}" for c in center_pcd]
     dimensions_formatted_pcd = [f"{d:.1f}" for d in dimensions_pcd]
     del center_pcd, dimensions_pcd
-    print(f"Original point cloud bounding box center: {center_formatted_pcd}")
-    print(f"Original Bounding box dimensions (width, height, depth): {dimensions_formatted_pcd}")
+    #print(f"Original point cloud bounding box center: {center_formatted_pcd}")
+    #print(f"Original Bounding box dimensions (width, height, depth): {dimensions_formatted_pcd}")
     del center_formatted_pcd, dimensions_formatted_pcd
     
     center_formatted = [f"{c:.1f}" for c in center]
     dimensions_formatted = [f"{d:.1f}" for d in dimensions]
     del center, dimensions
-    print(f"Corrected point cloud bounding box center: {center_formatted}")
-    print(f"Corrected Bounding box dimensions (width, height, depth): {dimensions_formatted}")
+    #print(f"Corrected point cloud bounding box center: {center_formatted}")
+    #print(f"Corrected Bounding box dimensions (width, height, depth): {dimensions_formatted}")
     del center_formatted, dimensions_formatted
 
     # Paint and save
@@ -267,8 +267,8 @@ def crop_and_save_plots(pcd, plots, outpath, transformation_json_path, force_cro
 
     for plot_id, coord in plots.items():
         lon, lat = coord['C']
-        print(f"Plot {plot_id} center: {lon}, {lat}")
-        print(f"Bounding box: {boundaries}")
+        #print(f"Plot {plot_id} center: {lon}, {lat}")
+        #print(f"Bounding box: {boundaries}")
 
         should_crop = force_crop or check_point_in_boundaries(lon, lat, boundaries)
         if should_crop:
@@ -283,14 +283,14 @@ def crop_and_save_plots(pcd, plots, outpath, transformation_json_path, force_cro
             # Step 2: Crop
             plot_pcd = crop_single_plot((UL, UR, LL, LR, pcd))
 
-            print("Checking if empty...")
+            #print("Checking if empty...")
             if not plot_pcd.is_empty():
                 outpath = outpath.encode('ascii', 'ignore').decode('ascii').strip()
                 plot_id_clean = plot_id.encode('ascii', 'ignore').decode('ascii').strip()
                 painted_pcd = paint_pcd(plot_pcd)
                 del plot_pcd
                 save_path = os.path.join(outpath, f"{plot_id_clean}.ply")
-                print("Saving to ", save_path)
+                #print("Saving to ", save_path)
                 save_pcd(painted_pcd, save_path)
                 print(f"Saved {save_path}\n")
             else:
@@ -319,17 +319,17 @@ def crop_single_plot(args):
     Crop point cloud using polygon defined by four UTM coordinates. 
     Creates bounding polygon, crops with Open3D, then returns cropped point cloud.
     """
-    print("Cropping single plot...")
+    #print("Cropping single plot...")
     UL = args[0]
     UR = args[1]
     LL = args[2]
     LR = args[3]
     pcd = args[4]
-    print("Expecting UTM coordinates for cropping polygon")
-    print("UL:", UL)
-    print("UR:", UR)
-    print("LL:", LL)
-    print("LR:", LR)
+    #print("Expecting UTM coordinates for cropping polygon")
+    #print("UL:", UL)
+    #print("UR:", UR)
+    #print("LL:", LL)
+    #print("LR:", LR)
     width = abs(UR[0] - UL[0])
     height = abs(UL[1] - LL[1])
     r_x = width * 0
@@ -342,15 +342,15 @@ def crop_single_plot(args):
         [LR[0] + r_x, LR[1] + r_y, 0],
         [LL[0] - r_x, LL[1] + r_y, 0]
     ]).astype('float64')
-    print("Bounding polygon (UTM):", bounding_polygon)
-    print("Point cloud bounds:", min_x, min_y, min_z, max_x, max_y, max_z)
+    #print("Bounding polygon (UTM):", bounding_polygon)
+    #print("Point cloud bounds:", min_x, min_y, min_z, max_x, max_y, max_z)
     vol = o3d.visualization.SelectionPolygonVolume()
     vol.orthogonal_axis = "Z"
     vol.axis_max = max_z
     vol.axis_min = min_z
     vol.bounding_polygon = o3d.utility.Vector3dVector(bounding_polygon)
     plot = vol.crop_point_cloud(pcd)
-    print("Finished cropping single plot")
+    #print("Finished cropping single plot")
     return plot
 
 def check_point_in_boundaries(lon,lat,boundaries):

@@ -3,10 +3,11 @@ from utils import *
 import tempfile
 import shutil
 from multiprocessing import Pool
+import time
 
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
-print("libraries imported")
+print("libraries imported", flush=True)
 
 def get_args():
     
@@ -63,6 +64,10 @@ def get_args():
                         help='disables saving of merged pcd',
                         action='store_true')
 
+    parser.add_argument('--disablefpcd',
+                        help='disables saving of only full-scale merged pcd',
+                        action='store_true')
+
     parser.add_argument('--disablecrop',
                         help='disables cropping of merged pcd',
                         action='store_true')
@@ -76,13 +81,14 @@ def get_args():
 
     return parser.parse_args()
 
-def process_folder(folder_name):
+def process_folder(args_tuple):
+    folder_name, input_path, output_path, transformation, date = args_tuple
     postprocess_single_pass(
-        path=args.input,
-        outpath=args.input,
+        path=input_path,
+        outpath=output_path,
         folder=folder_name,
-        transformation=args.transformation,
-        current_date=args.date
+        transformation=transformation,
+        current_date=date
     )
 
 def main():
@@ -91,18 +97,28 @@ def main():
         os.makedirs(args.output)
 
     # Step 1: Geocorrect all passes
+    print("Geocorrection started\n", flush=True)
+    start_time0 = time.perf_counter()
     if not args.disablegeo:
-        merged_dir = os.path.join(args.input, "merged")
         folder_names = [
-            f for f in os.listdir(merged_dir)
-            if os.path.isdir(os.path.join(merged_dir, f))
+            f for f in os.listdir(os.path.join(args.input, "merged"))
+            if os.path.isdir(os.path.join(args.input, "merged", f))
+        ]
+
+        args_list = [
+            (folder, args.input, args.input, args.transformation, args.date)
+            for folder in folder_names
         ]
         core_count = min(args.cores, len(folder_names))
         with Pool(processes=core_count) as pool:
-            pool.map(process_folder, folder_names)
-
+            pool.map(process_folder, args_list)
+    end_time = time.perf_counter()
+    elapsed_time_geo = end_time - start_time0
+    print(f"Elapsed time for geocorrection: {elapsed_time_geo:.4f} seconds", flush=True)
 
     # Step 2: Merge all geocorrected point clouds
+    print("Merging started\n", flush=True)
+    start_time = time.perf_counter()
     geocorrected_dir = os.path.join(args.input, "merged_geocorrected")
     merged_pcd = o3d.geometry.PointCloud()
     for pass_id in os.listdir(geocorrected_dir):
@@ -115,30 +131,61 @@ def main():
                     if not pcd.is_empty():
                         merged_pcd += pcd
                         del pcd
+    print("Merging complete\n", flush=True)
+    end_time = time.perf_counter()
+    elapsed_time_merge = end_time - start_time
+    print(f"Elapsed time for merging: {elapsed_time_merge:.4f} seconds", flush=True)
     if not args.disablepcd:
         if args.points:
-            merged_pcd_output = merged_pcd
+            start_time = time.perf_counter()
             max_points = args.points * 1_000_000
-            current_points = len(merged_pcd_output.points)
+            current_points = len(merged_pcd.points)
             if current_points > max_points:
-                print(f"Downsampling merged point cloud from {current_points} to {max_points} points...")
-                merged_pcd_output = merged_pcd_output.random_down_sample(max_points / current_points)
-                merged_pcd_output_outpath = os.path.join(args.input, args.date + "_" + str(args.points) + "milMax_merged_geocorrected.ply")
+                print(f"Downsampling merged point cloud from {current_points} to {max_points} points...", flush=True)
+                merged_pcd_output = merged_pcd.random_down_sample(max_points / current_points)
+                merged_pcd_output_outpath = os.path.join(args.output, args.date + "_" + str(args.points) + "milMax_merged_geocorrected.ply")
                 save_pcd(merged_pcd_output, merged_pcd_output_outpath)
                 del merged_pcd_output
-        # Commented out saving of full-scale point clouds due to extremely large size
-        #merged_pcd_outpath = os.path.join(args.input, args.date + "_full" + "_merged_geocorrected.ply")
-        #save_pcd(merged_pcd, merged_pcd_outpath)
+                if not args.disablefpcd:
+                    merged_pcd_outpath = os.path.join(args.output, args.date + "_full" + "_merged_geocorrected.ply")
+                    save_pcd(merged_pcd, merged_pcd_outpath)
+            else:
+                merged_pcd_outpath = os.path.join(args.output, args.date + "_full" + "_merged_geocorrected.ply")
+                save_pcd(merged_pcd, merged_pcd_outpath)
+            end_time = time.perf_counter()
+            elapsed_time_pcd = end_time - start_time
+            print(f"Elapsed time for outputting point clouds: {elapsed_time_pcd:.4f} seconds", flush=True)
+        
     
     if not args.disablecrop:
         # Step 3: Load plot definitions
-        print("\nLoading plot definitions...")
+        print("\nLoading plot definitions...", flush=True)
+        start_time = time.perf_counter()
         plots = load_plots(args.geojson)
-        print("Plots loaded\n")
+        print("Plots loaded\n", flush=True)
+        end_time = time.perf_counter()
+        elapsed_time_plots = end_time - start_time
+        print(f"Elapsed time for loading plots: {elapsed_time_plots:.4f} seconds", flush=True)
 
         # Step 4: Crop plots from the transformed cloud
-        print("Cropping plots from merged point cloud...")
-        crop_and_save_plots(merged_pcd, plots, args.output, args.transformation, force_crop=True)
+        print("Cropping plots from merged point cloud...", flush=True)
+        start_time = time.perf_counter()
+        crop_outpath = os.path.join(args.output,"plotclip_out")
+        if not os.path.isdir(crop_outpath):
+            os.makedirs(crop_outpath)
+        crop_and_save_plots(merged_pcd, plots, crop_outpath, args.transformation, force_crop=True)
+        end_time = time.perf_counter()
+        elapsed_time_crop = end_time - start_time
+        print(f"Elapsed time for cropping plots: {elapsed_time_crop:.4f} seconds", flush=True)
+    
+    end_time = time.perf_counter()
+    elapsed_time = end_time - start_time0
+    print(f"Elapsed time for geocorrection: {elapsed_time_geo:.4f} seconds", flush=True)
+    print(f"Elapsed time for merging: {elapsed_time_merge:.4f} seconds", flush=True)
+    print(f"Elapsed time for outputting point clouds: {elapsed_time_pcd:.4f} seconds", flush=True)
+    print(f"Elapsed time for loading plots: {elapsed_time_plots:.4f} seconds", flush=True)
+    print(f"Elapsed time for cropping plots: {elapsed_time_crop:.4f} seconds", flush=True)
+    print(f"Elapsed time for full process: {elapsed_time:.4f} seconds", flush=True)
 
 if __name__ == "__main__":
     main()

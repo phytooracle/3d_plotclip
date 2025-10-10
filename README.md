@@ -24,4 +24,5 @@ Subdirectories named after agricultural plots. Each subdirectory contains a sing
   * **Maximum number of points in millions for additional downsampled output point cloud (default: 1):** '-p', '--points'
   * **Disable geocorrection:** '--disablegeo'
   * **Disable saving of merged point cloud:** '--disablepcd'
+  * **Disable saving of only full-scale merged point cloud:** '--disablefpcd'
   * **Disable cropping of merged point cloud:** '--disablecrop'
