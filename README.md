@@ -1,4 +1,4 @@
-# 3D Plot Clip
+# 3D Plotclip
 This repository contains code for cropping plots from the 3D point clouds. 3D point clouds from scanner measurements are first geocorrected. Geocorrected files are merged and full-scale and downsampled merged point clouds are output. The full-scale merged point cloud is then cropped to the geoJSON shapefile to result in a directory containing a PLY file for each agricultural plot.
 
 ## Inputs
