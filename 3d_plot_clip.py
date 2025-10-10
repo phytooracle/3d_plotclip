@@ -2,6 +2,7 @@ import argparse
 from utils import *
 import tempfile
 import shutil
+from multiprocessing import Pool
 
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -54,8 +55,8 @@ def get_args():
                         type=int,
                         default=1)
 
-    parser.add_argument('--skipgeo',
-                        help='skips geocorrection',
+    parser.add_argument('--disablegeo',
+                        help='disables geocorrection',
                         action='store_true')
 
     parser.add_argument('--disablepcd',
@@ -65,8 +66,24 @@ def get_args():
     parser.add_argument('--disablecrop',
                         help='disables cropping of merged pcd',
                         action='store_true')
+                        
+    parser.add_argument('-c',
+                        '--cores',
+                        help='Maximum number of cpus to use in multiprocessing.',
+                        type=int,
+                        default=20,
+                        required=True)
 
     return parser.parse_args()
+
+def process_folder(folder_name):
+    postprocess_single_pass(
+        path=args.input,
+        outpath=args.input,
+        folder=folder_name,
+        transformation=args.transformation,
+        current_date=args.date
+    )
 
 def main():
     args = get_args()
@@ -74,17 +91,16 @@ def main():
         os.makedirs(args.output)
 
     # Step 1: Geocorrect all passes
-    if not args.skipgeo:
-        for folder_name in os.listdir(os.path.join(args.input, "merged")):
-            if os.path.isdir(os.path.join(args.input, "merged", folder_name)):
-                print(f"Geocorrecting pass: {folder_name}")
-                postprocess_single_pass(
-                    path=args.input,
-                    outpath=args.input,
-                    folder=folder_name,
-                    transformation=args.transformation,
-                    current_date=args.date
-                )
+    if not args.disablegeo:
+        merged_dir = os.path.join(args.input, "merged")
+        folder_names = [
+            f for f in os.listdir(merged_dir)
+            if os.path.isdir(os.path.join(merged_dir, f))
+        ]
+        core_count = min(args.cores, len(folder_names))
+        with Pool(processes=core_count) as pool:
+            pool.map(process_folder, folder_names)
+
 
     # Step 2: Merge all geocorrected point clouds
     geocorrected_dir = os.path.join(args.input, "merged_geocorrected")
@@ -98,6 +114,7 @@ def main():
                     pcd = o3d.io.read_point_cloud(pcd_path)
                     if not pcd.is_empty():
                         merged_pcd += pcd
+                        del pcd
     if not args.disablepcd:
         if args.points:
             merged_pcd_output = merged_pcd
@@ -108,8 +125,10 @@ def main():
                 merged_pcd_output = merged_pcd_output.random_down_sample(max_points / current_points)
                 merged_pcd_output_outpath = os.path.join(args.input, args.date + "_" + str(args.points) + "milMax_merged_geocorrected.ply")
                 save_pcd(merged_pcd_output, merged_pcd_output_outpath)
-        merged_pcd_outpath = os.path.join(args.input, args.date + "_full" + "_merged_geocorrected.ply")
-        save_pcd(merged_pcd, merged_pcd_outpath)
+                del merged_pcd_output
+        # Commented out saving of full-scale point clouds due to extremely large size
+        #merged_pcd_outpath = os.path.join(args.input, args.date + "_full" + "_merged_geocorrected.ply")
+        #save_pcd(merged_pcd, merged_pcd_outpath)
     
     if not args.disablecrop:
         # Step 3: Load plot definitions
