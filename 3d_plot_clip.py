@@ -2,8 +2,9 @@ import argparse
 from utils import *
 import tempfile
 import shutil
-from multiprocessing import Pool
+from multiprocessing import Pool, get_context
 import time
+import sys
 
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -76,20 +77,11 @@ def get_args():
                         '--cores',
                         help='Maximum number of cpus to use in multiprocessing.',
                         type=int,
-                        default=20,
                         required=True)
 
     return parser.parse_args()
 
-def process_folder(args_tuple):
-    folder_name, input_path, output_path, transformation, date = args_tuple
-    postprocess_single_pass(
-        path=input_path,
-        outpath=output_path,
-        folder=folder_name,
-        transformation=transformation,
-        current_date=date
-    )
+
 
 def main():
     args = get_args()
@@ -112,25 +104,37 @@ def main():
         core_count = min(args.cores, len(folder_names))
         with Pool(processes=core_count) as pool:
             pool.map(process_folder, args_list)
-    end_time = time.perf_counter()
-    elapsed_time_geo = end_time - start_time0
-    print(f"Elapsed time for geocorrection: {elapsed_time_geo:.4f} seconds", flush=True)
+
+        end_time = time.perf_counter()
+        elapsed_time_geo = end_time - start_time0
+        print(f"Elapsed time for geocorrection: {elapsed_time_geo:.4f} seconds", flush=True)
 
     # Step 2: Merge all geocorrected point clouds
     print("Merging started\n", flush=True)
     start_time = time.perf_counter()
     geocorrected_dir = os.path.join(args.input, "merged_geocorrected")
     merged_pcd = o3d.geometry.PointCloud()
-    for pass_id in os.listdir(geocorrected_dir):
+    
+    pass_ids = [
+        d for d in os.listdir(geocorrected_dir)
+        if os.path.isdir(os.path.join(geocorrected_dir, d))
+    ]
+
+    for idx, pass_id in enumerate(pass_ids, start=1):
+        start_time_indpass = time.perf_counter()
         pass_dir = os.path.join(geocorrected_dir, pass_id)
-        if os.path.isdir(pass_dir):
-            for filename in os.listdir(pass_dir):
-                if filename.endswith(".ply"):
-                    pcd_path = os.path.join(pass_dir, filename)
-                    pcd = o3d.io.read_point_cloud(pcd_path)
-                    if not pcd.is_empty():
-                        merged_pcd += pcd
-                        del pcd
+        for filename in os.listdir(pass_dir):
+            if filename.endswith(".ply"):
+                pcd_path = os.path.join(pass_dir, filename)
+                print(f"[{idx}/{len(pass_ids)}] Reading in {pcd_path}", flush=True)
+                pcd = o3d.io.read_point_cloud(pcd_path)
+                if not pcd.is_empty():
+                    merged_pcd += pcd
+                    del pcd
+        end_time_indpass = time.perf_counter()
+        elapsed_indpass = end_time_indpass - start_time_indpass
+        print(f"[{idx}/{len(pass_ids)}] Finished processing {pass_id} in {elapsed_indpass:.2f} seconds\n", flush=True)
+        
     print("Merging complete\n", flush=True)
     end_time = time.perf_counter()
     elapsed_time_merge = end_time - start_time
@@ -162,6 +166,7 @@ def main():
         print("\nLoading plot definitions...", flush=True)
         start_time = time.perf_counter()
         plots = load_plots(args.geojson)
+        print(f"[DEBUG] Number of plots loaded: {len(plots)}", flush=True)
         print("Plots loaded\n", flush=True)
         end_time = time.perf_counter()
         elapsed_time_plots = end_time - start_time
@@ -170,21 +175,77 @@ def main():
         # Step 4: Crop plots from the transformed cloud
         print("Cropping plots from merged point cloud...", flush=True)
         start_time = time.perf_counter()
-        crop_outpath = os.path.join(args.output,"plotclip_out")
-        if not os.path.isdir(crop_outpath):
-            os.makedirs(crop_outpath)
-        crop_and_save_plots(merged_pcd, plots, crop_outpath, args.transformation, force_crop=True)
+        
+        # Step 4a: Set up memory-mapped file
+        print("setting up memory-mapped file", flush=True)
+        start_time = time.perf_counter()
+        points = np.asarray(merged_pcd.points)
+        dtype = points.dtype
+        shape = points.shape
+        try:  
+            temp_dir = tempfile.gettempdir()
+            memmap_path = os.path.join(temp_dir, "points_memmap.dat")
+            memmap_array = np.memmap(memmap_path, dtype=dtype, mode='w+', shape=shape)
+            memmap_array[:] = points[:]
+        except Exception as e:
+            print(f"[ERROR] Failed memory map: {e}", flush=True)
+            sys.exit(1)
+        end_time = time.perf_counter()
+        elapsed_time_memmap = end_time - start_time
+        print(f"Elapsed time for memory mapping: {elapsed_time_memmap:.4f} seconds", flush=True)
+
+        # Step 4b: Prepare arguments
+        print("preparing args", flush=True)
+        crop_outpath = os.path.join(args.output, "plotclip_out")
+        os.makedirs(crop_outpath, exist_ok=True)
+        
+        print("getting boundaries", flush=True)    
+        start_time = time.perf_counter()  
+        bbox = merged_pcd.get_axis_aligned_bounding_box()
+        mins = bbox.get_min_bound()
+        maxs = bbox.get_max_bound()
+        new_mins = utm_to_latlon(mins[0], mins[1])
+        new_maxs = utm_to_latlon(maxs[0], maxs[1])
+        boundaries = {"mins": list(new_mins), "maxs": list(new_maxs)}
+        end_time = time.perf_counter()
+        elapsed_time_bounds = end_time - start_time
+        print(f"Elapsed time for getting boundaries: {elapsed_time_bounds:.4f} seconds", flush=True)
+
+        args_list = [
+            (plot_id, coords, memmap_path, shape, dtype, crop_outpath, boundaries, True)
+            for plot_id, coords in plots.items()
+        ]
+
+        # Step 4c: Run multiprocessing
+        core_count = min(args.cores, len(args_list))
+        print("starting the multiprocessing pool", flush=True)
+        print(f"[DEBUG] args_list length: {len(args_list)}", flush=True)
+
+        try:
+            with get_context("spawn").Pool(processes=core_count) as pool:
+                pool.map(crop_worker, args_list)
+        except Exception as e:
+            print(f"[ERROR] Multiprocessing failed: {e}", flush=True)
+
+        # Step 4d: Clean up shared memory
+        os.remove(memmap_path)
+        print("Removing memory-mapped file", flush=True)
+        
         end_time = time.perf_counter()
         elapsed_time_crop = end_time - start_time
-        print(f"Elapsed time for cropping plots: {elapsed_time_crop:.4f} seconds", flush=True)
+        print(f"Elapsed time for cropping plots: {elapsed_time_crop:.4f} seconds\n", flush=True)
     
     end_time = time.perf_counter()
     elapsed_time = end_time - start_time0
-    print(f"Elapsed time for geocorrection: {elapsed_time_geo:.4f} seconds", flush=True)
+    print(" --- Elapsed time summary ---", flush=True)
+    if not args.disablegeo:
+        print(f"Elapsed time for geocorrection: {elapsed_time_geo:.4f} seconds", flush=True)
     print(f"Elapsed time for merging: {elapsed_time_merge:.4f} seconds", flush=True)
-    print(f"Elapsed time for outputting point clouds: {elapsed_time_pcd:.4f} seconds", flush=True)
-    print(f"Elapsed time for loading plots: {elapsed_time_plots:.4f} seconds", flush=True)
-    print(f"Elapsed time for cropping plots: {elapsed_time_crop:.4f} seconds", flush=True)
+    if not args.disablepcd:
+        print(f"Elapsed time for outputting point clouds: {elapsed_time_pcd:.4f} seconds", flush=True)
+    if not args.disablecrop:
+        print(f"Elapsed time for loading plots: {elapsed_time_plots:.4f} seconds", flush=True)
+        print(f"Elapsed time for cropping plots: {elapsed_time_crop:.4f} seconds", flush=True)
     print(f"Elapsed time for full process: {elapsed_time:.4f} seconds", flush=True)
 
 if __name__ == "__main__":

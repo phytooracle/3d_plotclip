@@ -18,7 +18,7 @@ def utm_to_latlon(easting, northing):
         lon, lat = transformer_to_latlon.transform(easting, northing)
         return lon, lat
     except Exception as e:
-        print(f"Error converting UTM to lat/lon: {e}")
+        print(f"Error converting UTM to lat/lon: {e}", flush=True)
         return None
 
 def latlon_to_utm(lon, lat):
@@ -29,7 +29,7 @@ def latlon_to_utm(lon, lat):
         easting, northing = transformer_to_utm.transform(lon, lat)
         return easting, northing
     except Exception as e:
-        print(f"Error converting lat/lon to UTM: {e}")
+        print(f"Error converting lat/lon to UTM: {e}", flush=True)
         return None
 
 def transform_pcd(pcd, T):
@@ -146,7 +146,7 @@ def postprocess_single_pass(path, outpath, folder, transformation, current_date)
     # Paint and save
     painted_pcd = paint_pcd(transformed_pcd)
     save_pcd(painted_pcd, path_dict['geocorrected_merged_path'])
-    print(f"Saving geocorrected point cloud to {path_dict['geocorrected_merged_path']}\n")
+    print(f"Saving geocorrected point cloud to {path_dict['geocorrected_merged_path']}\n", flush=True)
     
 def save_pcd(pcd,path):
     """
@@ -218,30 +218,29 @@ def load_plots(geojson_path):
     """
     Parse GeoJSON file to extract plot definitions. Return dictionary of plot IDs with corner and center coordinates.
     """
+    
     plots = {}
-
     with open(geojson_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
+        for feature in data['features']:
+            plot_id = feature['properties'].get('ID')
+            geometry = feature['geometry']
+            coords = geometry['coordinates']
 
-    for feature in data['features']:
-        plot_id = feature['properties'].get('ID')
-        geometry = feature['geometry']
+            if geometry['type'] == 'MultiPolygon':
+                ring = coords[0][0]  # First polygon's exterior ring
+            elif geometry['type'] == 'Polygon':
+                ring = coords[0]     # Exterior ring
+            else:
+                continue  # Skip unsupported geometry types
 
-        if geometry['type'] == 'MultiPolygon':
-            # Get the first polygon's exterior ring
-            polygon = geometry['coordinates'][0]
-            if not polygon or len(polygon[0]) < 4:
+            if not ring or len(ring) < 4:
                 continue  # Not enough points
 
-            ring = polygon[0]  # exterior ring
-            UL = ring[0]
-            UR = ring[1]
-            LR = ring[2]
-            LL = ring[3]
-
+            UL, UR, LR, LL = ring[0], ring[1], ring[2], ring[3]
             xs = [pt[0] for pt in ring[:4]]
             ys = [pt[1] for pt in ring[:4]]
-            C = [sum(xs)/4, sum(ys)/4]
+            C = [sum(xs) / 4, sum(ys) / 4]
 
             plots[plot_id] = {
                 'UL': UL,
@@ -250,69 +249,7 @@ def load_plots(geojson_path):
                 'LR': LR,
                 'C': C
             }
-    
     return plots
-    
-def crop_and_save_plots(pcd, plots, outpath, transformation_json_path, force_crop=False):
-    """
-    Iterate through plots and crops corresponding regions from merged point cloud. 
-    Converts plot coordinates to UTM, crops point cloud using bounding polygons, 
-    and saves cropped plots to disk.
-    """
-    boundaries = get_boundings_pcd(pcd, tolatlon=True)
-
-    # Load transformation matrix
-    with open(transformation_json_path, 'r') as f:
-        T = np.array(json.load(f)["transformation"])
-
-    for plot_id, coord in plots.items():
-        lon, lat = coord['C']
-        #print(f"Plot {plot_id} center: {lon}, {lat}")
-        #print(f"Bounding box: {boundaries}")
-
-        should_crop = force_crop or check_point_in_boundaries(lon, lat, boundaries)
-        if should_crop:
-            print(f"Cropping and saving plot {plot_id}")
-
-            # Step 1: Convert laton to utm
-            UL = latlon_to_utm(coord['UL'][0], coord['UL'][1])
-            UR = latlon_to_utm(coord['UR'][0], coord['UR'][1])
-            LL = latlon_to_utm(coord['LL'][0], coord['LL'][1])
-            LR = latlon_to_utm(coord['LR'][0], coord['LR'][1])
-
-            # Step 2: Crop
-            plot_pcd = crop_single_plot((UL, UR, LL, LR, pcd))
-
-            #print("Checking if empty...")
-            if not plot_pcd.is_empty():
-                outpath = outpath.encode('ascii', 'ignore').decode('ascii').strip()
-                plot_id_clean = plot_id.encode('ascii', 'ignore').decode('ascii').strip()
-                painted_pcd = paint_pcd(plot_pcd)
-                del plot_pcd
-                save_path = os.path.join(outpath, f"{plot_id_clean}.ply")
-                #print("Saving to ", save_path)
-                save_pcd(painted_pcd, save_path)
-                print(f"Saved {save_path}\n")
-            else:
-                print(f"plot_pcd is empty for plot {plot_id}!")
-                print("Cropping polygon might be outside bounds.\n")
-        else:
-            print(f"Skipping plot {plot_id}: outside bounding box\n")
-            
-def get_boundings_pcd(pcd,tolatlon=False):
-    """
-    Compute bounding box of point cloud. Returns min and max coordinates. 
-    Optionally converts bounds to geographic coordinates.
-    """
-    mins = np.min(np.array(pcd.points),axis=0)
-    maxs = np.max(np.array(pcd.points),axis=0)
-
-    if not tolatlon:
-        return {"mins":list(mins),"maxs":list(maxs)}
-    else:
-        new_mins = utm_to_latlon(mins[0],mins[1])
-        new_maxs = utm_to_latlon(maxs[0],maxs[1])
-        return {"mins":list(new_mins),"maxs":list(new_maxs)}
         
 def crop_single_plot(args):
     """
@@ -358,3 +295,60 @@ def check_point_in_boundaries(lon,lat,boundaries):
     Checks if a given geographic point lies within specified bounding box limits.
     """
     return lon>boundaries['mins'][0] and lon<boundaries['maxs'][0] and lat>boundaries['mins'][1] and lat<boundaries['maxs'][1]
+
+def process_folder(args_tuple):
+    folder_name, input_path, output_path, transformation, date = args_tuple
+    postprocess_single_pass(
+        path=input_path,
+        outpath=output_path,
+        folder=folder_name,
+        transformation=transformation,
+        current_date=date
+    )
+
+def crop_worker(args):
+    try:
+        print(f"Starting crop_worker for plot {args[0]}", flush=True)
+            
+        try:
+            plot_id, coords, shm_name, shape, dtype, outpath, boundaries, force_crop = args
+
+            # Access memory-mapped file
+            shared_points = np.memmap(shm_name, dtype=dtype, mode='r+', shape=shape)
+
+            # Reconstruct point cloud
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(shared_points)
+
+            lon, lat = coords['C']
+            should_crop = force_crop or check_point_in_boundaries(lon, lat, boundaries)
+
+            if should_crop:
+                print(f"Cropping and saving plot {plot_id}", flush=True)
+
+                # Convert lat/lon to UTM
+                UL = latlon_to_utm(*coords['UL'])
+                UR = latlon_to_utm(*coords['UR'])
+                LL = latlon_to_utm(*coords['LL'])
+                LR = latlon_to_utm(*coords['LR'])
+
+                # Crop
+                plot_pcd = crop_single_plot((UL, UR, LL, LR, pcd))
+
+                if not plot_pcd.is_empty():
+                    outpath = outpath.encode('ascii', 'ignore').decode('ascii').strip()
+                    plot_id_clean = str(plot_id).encode('ascii', 'ignore').decode('ascii').strip()
+                    painted_pcd = paint_pcd(plot_pcd)
+                    del plot_pcd
+                    save_path = os.path.join(outpath, f"{plot_id_clean}.ply")
+                    save_pcd(painted_pcd, save_path)
+                    print(f"Saved {save_path}\n", flush=True)
+                else:
+                    print(f"plot_pcd is empty for plot {plot_id}!\nCropping polygon might be outside bounds.\n", flush=True)
+            else:
+                print(f"Skipping plot {plot_id}: outside bounding box\n", flush=True)
+
+        except Exception as e:
+            print(f"[ERROR] Failed to process plot {plot_id}: {e}", flush=True)
+    except Exception as e:
+        print(f"[Error] crop_worker crashed before start: {e}", flush=True)
