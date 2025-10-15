@@ -4,6 +4,7 @@ import json
 import numpy as np
 import open3d as o3d
 from pyproj import CRS, transform, Transformer
+import psutil
     
 proj_latlon = "EPSG:4326" #CRS.from_epsg(4326) # WGS 84 -- WGS84 - World Geodetic System 1984, used in GPS
 proj_utm = "EPSG:32612" #CRS.from_epsg(32612) # WGS 84 / UTM zone 12N
@@ -309,6 +310,7 @@ def process_folder(args_tuple):
 def crop_worker(args):
     try:
         print(f"Starting crop_worker for plot {args[0]}", flush=True)
+        log_memory_usage(f"crop_worker start - plot {args[0]}")
             
         try:
             plot_id, coords, shm_name, shape, dtype, outpath, boundaries, force_crop = args
@@ -347,8 +349,13 @@ def crop_worker(args):
                     print(f"plot_pcd is empty for plot {plot_id}!\nCropping polygon might be outside bounds.\n", flush=True)
             else:
                 print(f"Skipping plot {plot_id}: outside bounding box\n", flush=True)
-
+            log_memory_usage(f"crop_worker end - plot {args[0]}")
         except Exception as e:
             print(f"[ERROR] Failed to process plot {plot_id}: {e}", flush=True)
     except Exception as e:
         print(f"[Error] crop_worker crashed before start: {e}", flush=True)
+        
+def log_memory_usage(tag=""):
+    process = psutil.Process(os.getpid())
+    mem_gb = process.memory_info().rss / 1024 / 1024 / 1024
+    print(f"[MEMORY] {tag} Memory Usage: {mem_gb:.2f} GB", flush=True)

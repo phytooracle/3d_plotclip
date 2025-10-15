@@ -5,10 +5,10 @@ import shutil
 from multiprocessing import Pool, get_context
 import time
 import sys
+import resource
 
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
-print("libraries imported", flush=True)
 
 def get_args():
     
@@ -73,12 +73,16 @@ def get_args():
                         help='disables cropping of merged pcd',
                         action='store_true')
                         
-    parser.add_argument('-c',
-                        '--cores',
-                        help='Maximum number of cpus to use in multiprocessing.',
+    parser.add_argument('--cores_geo',
+                        help='Maximum number of cpus to use in geocorrection multiprocessing.',
                         type=int,
-                        required=True)
+                        default=4)
 
+    parser.add_argument('--cores_crop',
+                        help='Maximum number of cpus to use in cropping multiprocessing.',
+                        type=int,
+                        default=4)                        
+                        
     return parser.parse_args()
 
 
@@ -101,13 +105,13 @@ def main():
             (folder, args.input, args.input, args.transformation, args.date)
             for folder in folder_names
         ]
-        core_count = min(args.cores, len(folder_names))
+        core_count = min(args.cores_geo, len(folder_names))
         with Pool(processes=core_count) as pool:
             pool.map(process_folder, args_list)
 
         end_time = time.perf_counter()
-        elapsed_time_geo = end_time - start_time0
-        print(f"Elapsed time for geocorrection: {elapsed_time_geo:.4f} seconds", flush=True)
+        elapsed_time_geo = (end_time - start_time0) / 60
+        print(f"Elapsed time for geocorrection: {elapsed_time_geo:.4f} minutes", flush=True)
 
     # Step 2: Merge all geocorrected point clouds
     print("Merging started\n", flush=True)
@@ -136,9 +140,10 @@ def main():
         print(f"[{idx}/{len(pass_ids)}] Finished processing {pass_id} in {elapsed_indpass:.2f} seconds\n", flush=True)
         
     print("Merging complete\n", flush=True)
+    log_memory_usage("After merging point clouds")
     end_time = time.perf_counter()
-    elapsed_time_merge = end_time - start_time
-    print(f"Elapsed time for merging: {elapsed_time_merge:.4f} seconds", flush=True)
+    elapsed_time_merge = (end_time - start_time) / 60
+    print(f"Elapsed time for merging: {elapsed_time_merge:.4f} minutes", flush=True)
     if not args.disablepcd:
         if args.points:
             start_time = time.perf_counter()
@@ -157,8 +162,8 @@ def main():
                 merged_pcd_outpath = os.path.join(args.output, args.date + "_full" + "_merged_geocorrected.ply")
                 save_pcd(merged_pcd, merged_pcd_outpath)
             end_time = time.perf_counter()
-            elapsed_time_pcd = end_time - start_time
-            print(f"Elapsed time for outputting point clouds: {elapsed_time_pcd:.4f} seconds", flush=True)
+            elapsed_time_pcd = (end_time - start_time) / 60
+            print(f"Elapsed time for outputting point clouds: {elapsed_time_pcd:.4f} minutes", flush=True)
         
     
     if not args.disablecrop:
@@ -169,8 +174,8 @@ def main():
         print(f"[DEBUG] Number of plots loaded: {len(plots)}", flush=True)
         print("Plots loaded\n", flush=True)
         end_time = time.perf_counter()
-        elapsed_time_plots = end_time - start_time
-        print(f"Elapsed time for loading plots: {elapsed_time_plots:.4f} seconds", flush=True)
+        elapsed_time_plots = (end_time - start_time) / 60
+        print(f"Elapsed time for loading plots: {elapsed_time_plots:.4f} minutes", flush=True)
 
         # Step 4: Crop plots from the transformed cloud
         print("Cropping plots from merged point cloud...", flush=True)
@@ -190,9 +195,10 @@ def main():
         except Exception as e:
             print(f"[ERROR] Failed memory map: {e}", flush=True)
             sys.exit(1)
+        log_memory_usage("After memory-mapping")
         end_time = time.perf_counter()
-        elapsed_time_memmap = end_time - start_time
-        print(f"Elapsed time for memory mapping: {elapsed_time_memmap:.4f} seconds", flush=True)
+        elapsed_time_memmap = (end_time - start_time) / 60
+        print(f"Elapsed time for memory mapping: {elapsed_time_memmap:.4f} minutes", flush=True)
 
         # Step 4b: Prepare arguments
         print("preparing args", flush=True)
@@ -208,8 +214,8 @@ def main():
         new_maxs = utm_to_latlon(maxs[0], maxs[1])
         boundaries = {"mins": list(new_mins), "maxs": list(new_maxs)}
         end_time = time.perf_counter()
-        elapsed_time_bounds = end_time - start_time
-        print(f"Elapsed time for getting boundaries: {elapsed_time_bounds:.4f} seconds", flush=True)
+        elapsed_time_bounds = (end_time - start_time) / 60
+        print(f"Elapsed time for getting boundaries: {elapsed_time_bounds:.4f} minutes", flush=True)
 
         args_list = [
             (plot_id, coords, memmap_path, shape, dtype, crop_outpath, boundaries, True)
@@ -217,12 +223,13 @@ def main():
         ]
 
         # Step 4c: Run multiprocessing
-        core_count = min(args.cores, len(args_list))
+        core_count = min(args.cores_crop, len(args_list))
         print("starting the multiprocessing pool", flush=True)
         print(f"[DEBUG] args_list length: {len(args_list)}", flush=True)
+        log_memory_usage("Before starting multiprocessing")
 
         try:
-            with get_context("spawn").Pool(processes=core_count) as pool:
+            with get_context("spawn").Pool(processes=core_count, maxtasksperchild=1) as pool:
                 pool.map(crop_worker, args_list)
         except Exception as e:
             print(f"[ERROR] Multiprocessing failed: {e}", flush=True)
@@ -232,21 +239,23 @@ def main():
         print("Removing memory-mapped file", flush=True)
         
         end_time = time.perf_counter()
-        elapsed_time_crop = end_time - start_time
-        print(f"Elapsed time for cropping plots: {elapsed_time_crop:.4f} seconds\n", flush=True)
+        elapsed_time_crop = (end_time - start_time) / 60
+        print(f"Elapsed time for cropping plots: {elapsed_time_crop:.4f} minutes\n", flush=True)
     
     end_time = time.perf_counter()
-    elapsed_time = end_time - start_time0
-    print(" --- Elapsed time summary ---", flush=True)
+    elapsed_time = (end_time - start_time0) / 60
+    print(" --- Summary ---", flush=True)
     if not args.disablegeo:
-        print(f"Elapsed time for geocorrection: {elapsed_time_geo:.4f} seconds", flush=True)
-    print(f"Elapsed time for merging: {elapsed_time_merge:.4f} seconds", flush=True)
+        print(f"Elapsed time for geocorrection: {elapsed_time_geo:.4f} minutes", flush=True)
+    print(f"Elapsed time for merging: {elapsed_time_merge:.4f} minutes", flush=True)
     if not args.disablepcd:
-        print(f"Elapsed time for outputting point clouds: {elapsed_time_pcd:.4f} seconds", flush=True)
+        print(f"Elapsed time for outputting point clouds: {elapsed_time_pcd:.4f} minutes", flush=True)
     if not args.disablecrop:
-        print(f"Elapsed time for loading plots: {elapsed_time_plots:.4f} seconds", flush=True)
-        print(f"Elapsed time for cropping plots: {elapsed_time_crop:.4f} seconds", flush=True)
-    print(f"Elapsed time for full process: {elapsed_time:.4f} seconds", flush=True)
+        print(f"Elapsed time for loading plots: {elapsed_time_plots:.4f} minutes", flush=True)
+        print(f"Elapsed time for cropping plots: {elapsed_time_crop:.4f} minutes", flush=True)
+    print(f"Elapsed time for full process: {elapsed_time:.4f} minutes", flush=True)
+    mem_peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    print(f"[MEMORY] Peak usage: {mem_peak / 1024 / 1024:.2f} GB", flush=True)
 
 if __name__ == "__main__":
     main()

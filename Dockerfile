@@ -16,7 +16,8 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --no-cache-dir \
     open3d \
     numpy \
-    pyproj
+    pyproj \
+	psutil
 
 # Set entrypoint
 ENTRYPOINT ["python", "/app/3d_plot_clip.py"]

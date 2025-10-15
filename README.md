@@ -18,7 +18,8 @@ Subdirectories named after agricultural plots. Each subdirectory contains a sing
   * **Transformation (from landmark selection):** '-t', '--transformation'
   * **geoJSON file defining plot:** '-g', '--geojson'
   * **Date of data collection:** '-d', '--date'
-  * **Maximum number of CPUs to use in multiprocessing:** '-c', '--cores'
+  * **Maximum number of CPUs to use in geocorrection multiprocessing (default: 4):** '--cores_geo'
+  * **Maximum number of CPUs to use in cropping multiprocessing (default: 4):** '--cores_crop'
     
 * **Optional Arguments:** 
   * **Maximum number of points in millions for additional downsampled output point cloud (default: 1):** '-p', '--points'
