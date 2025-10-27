@@ -299,6 +299,8 @@ def check_point_in_boundaries(lon,lat,boundaries):
 
 def process_folder(args_tuple):
     folder_name, input_path, output_path, transformation, date = args_tuple
+    print(f"Starting process_folder for folder_name {args_tuple[0]}", flush=True)
+    log_memory_usage(f"process_folder start - folder_name {args_tuple[0]}")
     postprocess_single_pass(
         path=input_path,
         outpath=output_path,
@@ -306,6 +308,7 @@ def process_folder(args_tuple):
         transformation=transformation,
         current_date=date
     )
+    log_memory_usage(f"process_folder end - folder_name {args_tuple[0]}")
 
 def crop_worker(args):
     try:
@@ -359,3 +362,13 @@ def log_memory_usage(tag=""):
     process = psutil.Process(os.getpid())
     mem_gb = process.memory_info().rss / 1024 / 1024 / 1024
     print(f"[MEMORY] {tag} Memory Usage: {mem_gb:.2f} GB", flush=True)
+
+def estimate_worker_count(task_type, mem_per_worker_gb):
+    total_memory_gb = psutil.virtual_memory().total / (1024 ** 3)
+    available_memory_gb = psutil.virtual_memory().available / (1024 ** 3)
+    cpu_count = psutil.cpu_count(logical=False)  # physical cores
+    
+    usable_cores = max(cpu_count - 2, 1)
+    max_workers_by_memory = int(available_memory_gb // mem_per_worker_gb)
+    
+    return min(max_workers_by_memory, usable_cores)
