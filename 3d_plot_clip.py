@@ -81,7 +81,11 @@ def get_args():
     parser.add_argument('--cores_crop',
                         help='Maximum number of cpus to use in cropping multiprocessing.',
                         type=int,
-                        default=4)                        
+                        default=4)              
+
+    parser.add_argument('--dynamiccores', 
+                        help='Enable dynamic core allocation based on available resources.', 
+                        action='store_true')
                         
     return parser.parse_args()
 
@@ -105,7 +109,13 @@ def main():
             (folder, args.input, args.input, args.transformation, args.date)
             for folder in folder_names
         ]
-        core_count = min(args.cores_geo, len(folder_names))
+        #core_count = min(args.cores_geo, len(folder_names))
+        if args.dynamiccores:
+            geo_worker_mem_gb = 5
+            core_count = min(estimate_worker_count(geo_worker_mem_gb), len(folder_names))
+            print(f"[RESOURCE] Dynamic geo workers: {core_count}", flush=True)
+        else:
+            core_count = min(args.cores_geo, len(folder_names))
         with Pool(processes=core_count) as pool:
             pool.map(process_folder, args_list)
 
@@ -223,7 +233,16 @@ def main():
         ]
 
         # Step 4c: Run multiprocessing
-        core_count = min(args.cores_crop, len(args_list))
+        #core_count = min(args.cores_crop, len(args_list))
+        if args.dynamiccores:
+            process = psutil.Process(os.getpid())
+            mem_gb = process.memory_info().rss / (1024 ** 3)
+            crop_worker_mem_gb = mem_gb * 1.1 # add 10% as a buffer
+            print(f"[RESOURCE] Estimated memory per crop worker: {crop_worker_mem_gb:.2f} GB", flush=True)
+            core_count = min(estimate_worker_count(crop_worker_mem_gb), len(args_list))
+            print(f"[RESOURCE] Dynamic crop workers: {core_count}", flush=True)
+        else:
+            core_count = min(args.cores_crop, len(args_list))
         print("starting the multiprocessing pool", flush=True)
         print(f"[DEBUG] args_list length: {len(args_list)}", flush=True)
         log_memory_usage("Before starting multiprocessing")
