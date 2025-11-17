@@ -363,7 +363,7 @@ def log_memory_usage(tag=""):
     mem_gb = process.memory_info().rss / 1024 / 1024 / 1024
     print(f"[MEMORY] {tag} Memory Usage: {mem_gb:.2f} GB", flush=True)
 
-def estimate_worker_count(task_type, mem_per_worker_gb):
+def estimate_worker_count(mem_per_worker_gb):
     total_memory_gb = psutil.virtual_memory().total / (1024 ** 3)
     available_memory_gb = psutil.virtual_memory().available / (1024 ** 3)
     cpu_count = psutil.cpu_count(logical=False)  # physical cores
