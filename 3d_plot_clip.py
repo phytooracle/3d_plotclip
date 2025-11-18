@@ -122,38 +122,39 @@ def main():
         elapsed_time_geo = (end_time - start_time0) / 60
         print(f"Elapsed time for geocorrection: {elapsed_time_geo:.4f} minutes", flush=True)
 
-    # Step 2: Merge all geocorrected point clouds
-    print("Merging started\n", flush=True)
-    start_time = time.perf_counter()
-    geocorrected_dir = os.path.join(args.input, "merged_geocorrected")
-    merged_pcd = o3d.geometry.PointCloud()
-    
-    pass_ids = [
-        d for d in os.listdir(geocorrected_dir)
-        if os.path.isdir(os.path.join(geocorrected_dir, d))
-    ]
 
-    for idx, pass_id in enumerate(pass_ids, start=1):
-        start_time_indpass = time.perf_counter()
-        pass_dir = os.path.join(geocorrected_dir, pass_id)
-        for filename in os.listdir(pass_dir):
-            if filename.endswith(".ply"):
-                pcd_path = os.path.join(pass_dir, filename)
-                print(f"[{idx}/{len(pass_ids)}] Reading in {pcd_path}", flush=True)
-                pcd = o3d.io.read_point_cloud(pcd_path)
-                if not pcd.is_empty():
-                    merged_pcd += pcd
-                    del pcd
-        end_time_indpass = time.perf_counter()
-        elapsed_indpass = end_time_indpass - start_time_indpass
-        print(f"[{idx}/{len(pass_ids)}] Finished processing {pass_id} in {elapsed_indpass:.2f} seconds\n", flush=True)
-        
-    print("Merging complete\n", flush=True)
-    log_memory_usage("After merging point clouds")
-    end_time = time.perf_counter()
-    elapsed_time_merge = (end_time - start_time) / 60
-    print(f"Elapsed time for merging: {elapsed_time_merge:.4f} minutes", flush=True)
     if not args.disablepcd:
+        # Step 2: Merge all geocorrected point clouds
+        print("Merging started\n", flush=True)
+        start_time = time.perf_counter()
+        geocorrected_dir = os.path.join(args.input, "merged_geocorrected")
+        merged_pcd = o3d.geometry.PointCloud()
+        
+        pass_ids = [
+            d for d in os.listdir(geocorrected_dir)
+            if os.path.isdir(os.path.join(geocorrected_dir, d))
+        ]
+
+        for idx, pass_id in enumerate(pass_ids, start=1):
+            start_time_indpass = time.perf_counter()
+            pass_dir = os.path.join(geocorrected_dir, pass_id)
+            for filename in os.listdir(pass_dir):
+                if filename.endswith(".ply"):
+                    pcd_path = os.path.join(pass_dir, filename)
+                    print(f"[{idx}/{len(pass_ids)}] Reading in {pcd_path}", flush=True)
+                    pcd = o3d.io.read_point_cloud(pcd_path)
+                    if not pcd.is_empty():
+                        merged_pcd += pcd
+                        del pcd
+            end_time_indpass = time.perf_counter()
+            elapsed_indpass = end_time_indpass - start_time_indpass
+            print(f"[{idx}/{len(pass_ids)}] Finished processing {pass_id} in {elapsed_indpass:.2f} seconds\n", flush=True)
+            
+        print("Merging complete\n", flush=True)
+        log_memory_usage("After merging point clouds")
+        end_time = time.perf_counter()
+        elapsed_time_merge = (end_time - start_time) / 60
+        print(f"Elapsed time for merging: {elapsed_time_merge:.4f} minutes", flush=True)
         if args.points:
             start_time = time.perf_counter()
             max_points = args.points * 1_000_000
