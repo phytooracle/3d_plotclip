@@ -335,17 +335,26 @@ def crop_plots_from_pass(args):
             return
 
         for plot_id, coords in plots.items():
+            print(f"[INFO] Plot ID: {plot_id}, Coords: {coords}", flush=True) 
             UL = latlon_to_utm(*coords['UL'])
             UR = latlon_to_utm(*coords['UR'])
             LL = latlon_to_utm(*coords['LL'])
             LR = latlon_to_utm(*coords['LR'])
-
+            
+            print("Starting crop", flush=True)
             cropped = crop_single_plot((UL, UR, LL, LR, pcd))
-            if not cropped.is_empty():
+            print("Finished crop", flush=True)
+            if cropped.is_empty():
+                print(f"[WARNING] Empty point cloud!", flush=True)
+                continue
+            else:
+                print("Painting pcd", flush=True)
                 painted = paint_pcd(cropped)
+                print("Painted pcd", flush=True)
                 plot_dir = os.path.join(partial_out_dir, plot_id)
                 os.makedirs(plot_dir, exist_ok=True)
                 save_path = os.path.join(plot_dir, os.path.basename(pass_pcd_path))
+                print(f"[INFO] Saving {save_path}", flush=True)
                 save_pcd(painted, save_path)
         del pcd
         log_memory_usage(f"Finished cropping for pass {pass_pcd_path}")

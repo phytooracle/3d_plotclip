@@ -115,6 +115,7 @@ def main():
             print(f"[RESOURCE] Dynamic geo workers: {core_count}", flush=True)
         else:
             core_count = min(args.cores_geo, len(folder_names))
+            print(f"[RESOURCE] Standard geo workers: {core_count}", flush=True)
         with Pool(processes=core_count) as pool:
             pool.map(process_folder, args_list)
 
@@ -209,6 +210,7 @@ def main():
             print(f"[RESOURCE] Dynamic crop workers: {core_count}", flush=True)
         else:
             core_count = min(args.cores_crop, len(worker_args))
+            print(f"[RESOURCE] Standard crop workers: {core_count}", flush=True)
 
         # Parallel crop
         start_time = time.perf_counter()
@@ -232,8 +234,8 @@ def main():
     print(" --- Summary ---", flush=True)
     if not args.disablegeo:
         print(f"Elapsed time for geocorrection: {elapsed_time_geo:.4f} minutes", flush=True)
-    print(f"Elapsed time for merging: {elapsed_time_merge:.4f} minutes", flush=True)
     if not args.disablepcd:
+        print(f"Elapsed time for merging: {elapsed_time_merge:.4f} minutes", flush=True)
         print(f"Elapsed time for outputting point clouds: {elapsed_time_pcd:.4f} minutes", flush=True)
     if not args.disablecrop:
         print(f"Elapsed time for loading plots: {elapsed_time_plots:.4f} minutes", flush=True)
