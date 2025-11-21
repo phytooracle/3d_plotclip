@@ -9,7 +9,7 @@ Transformation JSON output from 3D Landmark selection.
 Season GeoJSON defining plot boundaries.
 
 ## Outputs
-Subdirectories named after agricultural plots. Each subdirectory contains a single 3D point cloud that consitute an individual plot.
+Subdirectories named after agricultural plots. Each subdirectory contains a single 3D point cloud that consitute an individual plot. Full-resolution and downsampled fullfield point clouds are also output.
 
 ## Arguments and Flags
 * **Required Arguments:**
