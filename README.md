@@ -20,7 +20,7 @@ Subdirectories named after agricultural plots. Each subdirectory contains a sing
   * **Date of data collection:** '-d', '--date'
   * **Maximum number of CPUs to use in geocorrection multiprocessing (default: 4):** '--cores_geo'
   * **Maximum number of CPUs to use in cropping multiprocessing (default: 4):** '--cores_crop'
-  * **Enable dynamic core allocation based on available resources: ** '--dynamiccores'
+  * **Enable dynamic core allocation based on available resources:** '--dynamiccores'
     
 * **Optional Arguments:** 
   * **Maximum number of points in millions for additional downsampled output point cloud (default: 1):** '-p', '--points'
