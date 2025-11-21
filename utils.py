@@ -147,7 +147,7 @@ def postprocess_single_pass(path, outpath, folder, transformation, current_date)
     # Paint and save
     painted_pcd = paint_pcd(transformed_pcd)
     save_pcd(painted_pcd, path_dict['geocorrected_merged_path'])
-    print(f"Saving geocorrected point cloud to {path_dict['geocorrected_merged_path']}\n", flush=True)
+    print(f"Saving geocorrected point cloud to {path_dict['geocorrected_merged_path']}", flush=True)
     
 def save_pcd(pcd,path):
     """
@@ -302,7 +302,7 @@ def process_folder(args_tuple):
         transformation=transformation,
         current_date=date
     )
-    log_memory_usage(f"process_folder end - folder_name {args_tuple[0]}")
+    log_memory_usage(f"process_folder end - folder_name {args_tuple[0]}\n")
         
 def log_memory_usage(tag=""):
     process = psutil.Process(os.getpid())
@@ -335,31 +335,31 @@ def crop_plots_from_pass(args):
             return
 
         for plot_id, coords in plots.items():
-            print(f"[INFO] Plot ID: {plot_id}, Coords: {coords}", flush=True) 
+            #print(f"[INFO] Plot ID: {plot_id}, Coords: {coords}", flush=True) 
             UL = latlon_to_utm(*coords['UL'])
             UR = latlon_to_utm(*coords['UR'])
             LL = latlon_to_utm(*coords['LL'])
             LR = latlon_to_utm(*coords['LR'])
             
-            print("Starting crop", flush=True)
+            #print("Starting crop", flush=True)
             cropped = crop_single_plot((UL, UR, LL, LR, pcd))
-            print("Finished crop", flush=True)
+            #print("Finished crop", flush=True)
             if cropped.is_empty():
-                print(f"[WARNING] Empty point cloud!", flush=True)
+                #print(f"[WARNING] Empty point cloud!", flush=True)
                 continue
             else:
-                print("Painting pcd", flush=True)
+                #print("Painting pcd", flush=True)
                 painted = paint_pcd(cropped)
-                print("Painted pcd", flush=True)
+                #print("Painted pcd", flush=True)
                 plot_dir = os.path.join(partial_out_dir, plot_id)
                 os.makedirs(plot_dir, exist_ok=True)
                 save_path = os.path.join(plot_dir, os.path.basename(pass_pcd_path))
-                print(f"[INFO] Saving {save_path}", flush=True)
+                #print(f"[INFO] Saving {save_path}", flush=True)
                 save_pcd(painted, save_path)
         del pcd
-        log_memory_usage(f"Finished cropping for pass {pass_pcd_path}")
+        log_memory_usage(f"Finished cropping for pass {pass_pcd_path}\n")
     except Exception as e:
-        print(f"[ERROR] crop_plots_from_pass failed for {pass_pcd_path}: {e}", flush=True)
+        print(f"[ERROR] crop_plots_from_pass failed for {pass_pcd_path}: {e}\n", flush=True)
 
 def merge_partial_plots(partial_out_dir, final_out_dir):
     """

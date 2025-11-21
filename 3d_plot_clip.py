@@ -121,7 +121,7 @@ def main():
 
         end_time = time.perf_counter()
         elapsed_time_geo = (end_time - start_time0) / 60
-        print(f"Elapsed time for geocorrection: {elapsed_time_geo:.4f} minutes", flush=True)
+        print(f"Elapsed time for geocorrection: {elapsed_time_geo:.4f} minutes\n", flush=True)
 
 
     if not args.disablepcd:
@@ -214,20 +214,20 @@ def main():
 
         # Parallel crop
         start_time = time.perf_counter()
-        print("Cropping plots from merged point cloud...", flush=True)
+        print("Cropping plots from merged point cloud...\n", flush=True)
         with get_context("spawn").Pool(processes=core_count) as pool:
             pool.map(crop_plots_from_pass, worker_args)
         end_time = time.perf_counter()
         
         elapsed_time_crop = (end_time - start_time) / 60
-        print(f"[INFO] Cropping completed in {elapsed_time_crop:.2f} minutes", flush=True)
+        print(f"[INFO] Cropping completed in {elapsed_time_crop:.2f} minutes\n", flush=True)
 
         # Merge partial plots
         start_time = time.perf_counter()
         merge_partial_plots(partial_out_dir, final_out_dir)
         end_time = time.perf_counter()
         elapsed_time_final_merge = (end_time - start_time) / 60
-        print(f"[INFO] Final merging completed in {elapsed_time_final_merge:.2f} minutes", flush=True)
+        print(f"[INFO] Final merging completed in {elapsed_time_final_merge:.2f} minutes\n", flush=True)
     
     end_time = time.perf_counter()
     elapsed_time = (end_time - start_time0) / 60
