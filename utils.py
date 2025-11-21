@@ -3,7 +3,7 @@ import os
 import json
 import numpy as np
 import open3d as o3d
-from pyproj import CRS, transform, Transformer
+from pyproj import Transformer
 import psutil
     
 proj_latlon = "EPSG:4326" #CRS.from_epsg(4326) # WGS 84 -- WGS84 - World Geodetic System 1984, used in GPS
@@ -147,7 +147,7 @@ def postprocess_single_pass(path, outpath, folder, transformation, current_date)
     # Paint and save
     painted_pcd = paint_pcd(transformed_pcd)
     save_pcd(painted_pcd, path_dict['geocorrected_merged_path'])
-    print(f"Saving geocorrected point cloud to {path_dict['geocorrected_merged_path']}\n", flush=True)
+    print(f"Saving geocorrected point cloud to {path_dict['geocorrected_merged_path']}", flush=True)
     
 def save_pcd(pcd,path):
     """
@@ -291,12 +291,6 @@ def crop_single_plot(args):
     #print("Finished cropping single plot")
     return plot
 
-def check_point_in_boundaries(lon,lat,boundaries):
-    """
-    Checks if a given geographic point lies within specified bounding box limits.
-    """
-    return lon>boundaries['mins'][0] and lon<boundaries['maxs'][0] and lat>boundaries['mins'][1] and lat<boundaries['maxs'][1]
-
 def process_folder(args_tuple):
     folder_name, input_path, output_path, transformation, date = args_tuple
     print(f"Starting process_folder for folder_name {args_tuple[0]}", flush=True)
@@ -308,55 +302,7 @@ def process_folder(args_tuple):
         transformation=transformation,
         current_date=date
     )
-    log_memory_usage(f"process_folder end - folder_name {args_tuple[0]}")
-
-def crop_worker(args):
-    try:
-        print(f"Starting crop_worker for plot {args[0]}", flush=True)
-        log_memory_usage(f"crop_worker start - plot {args[0]}")
-            
-        try:
-            plot_id, coords, shm_name, shape, dtype, outpath, boundaries, force_crop = args
-
-            # Access memory-mapped file
-            shared_points = np.memmap(shm_name, dtype=dtype, mode='r+', shape=shape)
-
-            # Reconstruct point cloud
-            pcd = o3d.geometry.PointCloud()
-            pcd.points = o3d.utility.Vector3dVector(shared_points)
-
-            lon, lat = coords['C']
-            should_crop = force_crop or check_point_in_boundaries(lon, lat, boundaries)
-
-            if should_crop:
-                print(f"Cropping and saving plot {plot_id}", flush=True)
-
-                # Convert lat/lon to UTM
-                UL = latlon_to_utm(*coords['UL'])
-                UR = latlon_to_utm(*coords['UR'])
-                LL = latlon_to_utm(*coords['LL'])
-                LR = latlon_to_utm(*coords['LR'])
-
-                # Crop
-                plot_pcd = crop_single_plot((UL, UR, LL, LR, pcd))
-
-                if not plot_pcd.is_empty():
-                    outpath = outpath.encode('ascii', 'ignore').decode('ascii').strip()
-                    plot_id_clean = str(plot_id).encode('ascii', 'ignore').decode('ascii').strip()
-                    painted_pcd = paint_pcd(plot_pcd)
-                    del plot_pcd
-                    save_path = os.path.join(outpath, f"{plot_id_clean}.ply")
-                    save_pcd(painted_pcd, save_path)
-                    print(f"Saved {save_path}\n", flush=True)
-                else:
-                    print(f"plot_pcd is empty for plot {plot_id}!\nCropping polygon might be outside bounds.\n", flush=True)
-            else:
-                print(f"Skipping plot {plot_id}: outside bounding box\n", flush=True)
-            log_memory_usage(f"crop_worker end - plot {args[0]}")
-        except Exception as e:
-            print(f"[ERROR] Failed to process plot {plot_id}: {e}", flush=True)
-    except Exception as e:
-        print(f"[Error] crop_worker crashed before start: {e}", flush=True)
+    log_memory_usage(f"process_folder end - folder_name {args_tuple[0]}\n")
         
 def log_memory_usage(tag=""):
     process = psutil.Process(os.getpid())
@@ -364,11 +310,73 @@ def log_memory_usage(tag=""):
     print(f"[MEMORY] {tag} Memory Usage: {mem_gb:.2f} GB", flush=True)
 
 def estimate_worker_count(mem_per_worker_gb):
-    total_memory_gb = psutil.virtual_memory().total / (1024 ** 3)
     available_memory_gb = psutil.virtual_memory().available / (1024 ** 3)
     cpu_count = psutil.cpu_count(logical=False)  # physical cores
-    
     usable_cores = max(cpu_count - 2, 1)
     max_workers_by_memory = int(available_memory_gb // mem_per_worker_gb)
+    if max_workers_by_memory < 1:
+        print("Warning: Not enough memory to run even one worker with the specified memory per worker.")
+        max_workers_by_memory = 1
+    worker_estimate = min(max_workers_by_memory, usable_cores)
     
-    return min(max_workers_by_memory, usable_cores)
+    return worker_estimate
+
+def crop_plots_from_pass(args):
+    """
+    Worker function: Load one geocorrected pass, crop all plots that intersect it,
+    and save partial outputs.
+    """
+    pass_pcd_path, plots, partial_out_dir = args
+    try:
+        print(f"[INFO] Processing pass: {pass_pcd_path}", flush=True)
+        pcd = load_pcd(pass_pcd_path)
+        if pcd.is_empty():
+            print(f"[WARNING] Empty point cloud for {pass_pcd_path}", flush=True)
+            return
+
+        for plot_id, coords in plots.items():
+            #print(f"[INFO] Plot ID: {plot_id}, Coords: {coords}", flush=True) 
+            UL = latlon_to_utm(*coords['UL'])
+            UR = latlon_to_utm(*coords['UR'])
+            LL = latlon_to_utm(*coords['LL'])
+            LR = latlon_to_utm(*coords['LR'])
+            
+            #print("Starting crop", flush=True)
+            cropped = crop_single_plot((UL, UR, LL, LR, pcd))
+            #print("Finished crop", flush=True)
+            if cropped.is_empty():
+                #print(f"[WARNING] Empty point cloud!", flush=True)
+                continue
+            else:
+                #print("Painting pcd", flush=True)
+                painted = paint_pcd(cropped)
+                #print("Painted pcd", flush=True)
+                plot_dir = os.path.join(partial_out_dir, plot_id)
+                os.makedirs(plot_dir, exist_ok=True)
+                save_path = os.path.join(plot_dir, os.path.basename(pass_pcd_path))
+                #print(f"[INFO] Saving {save_path}", flush=True)
+                save_pcd(painted, save_path)
+        del pcd
+        log_memory_usage(f"Finished cropping for pass {pass_pcd_path}\n")
+    except Exception as e:
+        print(f"[ERROR] crop_plots_from_pass failed for {pass_pcd_path}: {e}\n", flush=True)
+
+def merge_partial_plots(partial_out_dir, final_out_dir):
+    """
+    Combine all partial plot files into final outputs.
+    """
+    os.makedirs(final_out_dir, exist_ok=True)
+    for plot_id in os.listdir(partial_out_dir):
+        plot_dir = os.path.join(partial_out_dir, plot_id)
+        if not os.path.isdir(plot_dir):
+            continue
+        merged = o3d.geometry.PointCloud()
+        for ply_file in os.listdir(plot_dir):
+            if ply_file.endswith('.ply'):
+                pcd = o3d.io.read_point_cloud(os.path.join(plot_dir, ply_file))
+                if not pcd.is_empty():
+                    merged += pcd
+        if not merged.is_empty():
+            save_path = os.path.join(final_out_dir, f"{plot_id}.ply")
+            save_pcd(merged, save_path)
+            print(f"[INFO] Final plot saved: {save_path}", flush=True)
